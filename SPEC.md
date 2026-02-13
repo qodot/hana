@@ -62,7 +62,7 @@ Codex는 소스 경로와 동일하므로 심링크를 생성하지 않는다.
   3. 다른 에이전트 경로에도 심링크 생성
 ```
 
-### 지침 동기화
+### 지침 동기화 (프로젝트 레벨)
 
 ```
 AGENTS.md   ← 소스 (실제 파일, 오픈 표준)
@@ -72,6 +72,34 @@ PI.md       → AGENTS.md (심링크)
 
 Codex와 OpenCode는 `AGENTS.md`를 직접 읽으므로 심링크가 필요 없다.
 모노레포의 경우 하위 디렉토리의 `AGENTS.md`도 동일하게 처리한다.
+
+### 지침 동기화 (글로벌 레벨)
+
+글로벌 지침의 소스 오브 트루스는 `~/.agents/AGENTS.md`이다. 스킬 소스 경로(`~/.agents/skills/`)와 일관된 위치를 사용한다.
+
+| 에이전트 | 글로벌 지침 파일 | 동기화 방식 |
+|---------|----------------|-----------|
+| Claude Code | `~/.claude/CLAUDE.md` | 심링크 (파일명 다름) |
+| Codex | `~/.codex/AGENTS.md` | 심링크 |
+| OpenCode | `~/.config/opencode/AGENTS.md` | 심링크 |
+| Pi | `~/.pi/agent/APPEND_SYSTEM.md` | 심링크 |
+
+```
+~/.agents/AGENTS.md              ← 소스 (실제 파일)
+~/.claude/CLAUDE.md              → ~/.agents/AGENTS.md (심링크)
+~/.codex/AGENTS.md               → ~/.agents/AGENTS.md (심링크)
+~/.config/opencode/AGENTS.md     → ~/.agents/AGENTS.md (심링크)
+~/.pi/agent/APPEND_SYSTEM.md     → ~/.agents/AGENTS.md (심링크)
+```
+
+#### Pi 글로벌 지침 참고
+
+Pi는 전용 글로벌 지침 파일이 없다. 대신 다음 메커니즘을 사용한다:
+- `~/.pi/agent/SYSTEM.md`: 시스템 프롬프트 **전체 교체** (hana에서는 사용하지 않음)
+- `~/.pi/agent/APPEND_SYSTEM.md`: 시스템 프롬프트에 **추가**
+- Pi는 프로젝트 루트의 `AGENTS.md`, `CLAUDE.md`도 컨텍스트 파일로 자동 로드
+
+`APPEND_SYSTEM.md`에 심링크하면 `AGENTS.md` 내용이 시스템 프롬프트에 추가되는 형태로 반영된다. 다른 에이전트처럼 독립 파일로 로드되는 것이 아니라 프롬프트에 직접 삽입되므로, 같은 내용이지만 전달 방식이 다르다는 점에 유의.
 
 ## 충돌 처리
 

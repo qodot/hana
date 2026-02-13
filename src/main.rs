@@ -1,5 +1,6 @@
 mod config;
 mod init;
+mod status;
 mod sync;
 
 use std::path::PathBuf;
@@ -11,6 +12,7 @@ fn main() {
     let result = match args.get(1).map(|s| s.as_str()) {
         Some("init") => init::run(&args[2..]),
         Some("sync") => cmd_sync(&args[2..]),
+        Some("status") => cmd_status(&args[2..]),
         Some("--help" | "-h") | None => {
             print_help();
             Ok(())
@@ -114,6 +116,31 @@ fn cmd_sync(args: &[String]) -> Result<(), i32> {
     }
 
     println!("\n완료!");
+    Ok(())
+}
+
+fn cmd_status(args: &[String]) -> Result<(), i32> {
+    let is_global = args.iter().any(|a| a == "--global");
+
+    let base_dir = if is_global {
+        dirs::home_dir().ok_or_else(|| {
+            eprintln!("🌸 홈 디렉토리를 찾을 수 없습니다.");
+            1
+        })?
+    } else {
+        PathBuf::from(".")
+    };
+
+    let config_path = base_dir.join(".agents/hana.toml");
+
+    let config = config::Config::load(&config_path).map_err(|e| {
+        eprintln!("🌸 {e}");
+        eprintln!("   hana init 으로 설정 파일을 먼저 생성하세요.");
+        1
+    })?;
+
+    let result = status::execute(&config, &base_dir);
+    print!("{}", status::format_result(&result));
     Ok(())
 }
 

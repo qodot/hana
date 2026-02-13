@@ -67,10 +67,9 @@ Codex는 소스 경로와 동일하므로 심링크를 생성하지 않는다.
 ```
 AGENTS.md   ← 소스 (실제 파일, 오픈 표준)
 CLAUDE.md   → AGENTS.md (심링크)
-PI.md       → AGENTS.md (심링크)
 ```
 
-Codex와 OpenCode는 `AGENTS.md`를 직접 읽으므로 심링크가 필요 없다.
+Codex, OpenCode, Pi는 `AGENTS.md`를 직접 읽으므로 심링크가 필요 없다.
 모노레포의 경우 하위 디렉토리의 `AGENTS.md`도 동일하게 처리한다.
 
 ### 지침 동기화 (글로벌 레벨)

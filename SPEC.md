@@ -211,7 +211,8 @@ $ hana status
 
 ## 기술 스택
 
-> 미정. 후보:
-> - TypeScript (npm 배포 용이, 에이전트 도구 생태계와 일관)
-> - Rust (빠르고 단일 바이너리)
-> - Go (단일 바이너리, 심플)
+- **언어**: Rust
+- **크레이트 이름**: `hanacli` (crates.io)
+- **바이너리 이름**: `hana`
+- **배포**: `cargo install hanacli`, macOS는 Homebrew tap 추가 제공
+- **CI**: `cargo-dist`로 멀티 플랫폼 빌드 + 릴리스 자동화

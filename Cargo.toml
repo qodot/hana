@@ -1,0 +1,15 @@
+[package]
+name = "hanacli"
+version = "0.1.0"
+edition = "2024"
+description = "Sync AI coding agent skills and instructions via symlinks"
+license = "MIT"
+repository = "https://github.com/qodot/hana"
+keywords = ["ai", "coding-agent", "symlink", "sync"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "hana"
+path = "src/main.rs"
+
+[dependencies]

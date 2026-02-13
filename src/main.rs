@@ -44,6 +44,14 @@ fn main() {
 
 fn cmd_init(args: &[String]) {
     let is_global = args.iter().any(|a| a == "--global");
+    let is_dry_run = args.iter().any(|a| a == "--dry-run");
+
+    if is_dry_run {
+        let path = if is_global { "~/.agents/hana.toml" } else { ".agents/hana.toml" };
+        println!("🌸 {path} 에 생성될 내용:\n");
+        print!("{DEFAULT_CONFIG}");
+        return;
+    }
 
     let config_path = if is_global {
         let home = dirs::home_dir().unwrap_or_else(|| {

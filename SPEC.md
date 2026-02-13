@@ -124,29 +124,37 @@ Pi는 `~/.pi/agent/AGENTS.md`를 글로벌 지침으로 자동 로드한다. 추
 
 현재 디렉토리에 hana 설정 파일(`hana.toml`)을 생성한다.
 
-```toml
-# hana 설정 파일
+프로젝트 레벨은 `hana.toml`, 글로벌 레벨은 `~/.agents/hana.toml`에 각각 설정한다.
 
-# 스킬 소스 디렉토리
+```toml
+# hana.toml (프로젝트 레벨)
+
 [skills]
 source = ".agents/skills"
 
-# 지침 소스 파일 (AGENTS.md 오픈 표준)
 [instructions]
 source = "AGENTS.md"
 
-# 동기화 대상 에이전트
-[targets]
-claude = true
-codex = true       # 소스와 동일하면 스킵
-pi = true
-opencode = true
+[targets.claude]
+skills = true
+instructions = true
 
-# 글로벌 동기화
-[global]
-enabled = false
-source = "~/.agents/skills"
+[targets.codex]
+skills = true
+instructions = true
+
+[targets.pi]
+skills = true
+instructions = true
+
+[targets.opencode]
+skills = true
+instructions = true
 ```
+
+기본값은 모두 `true`이며, 특정 에이전트의 스킬 또는 지침 동기화만 끄고 싶을 때 `false`로 설정한다.
+
+`hana init --global`은 `~/.agents/hana.toml`을 생성한다. 구조는 동일하되 경로만 글로벌 기준이다.
 
 ### `hana sync`
 
@@ -168,8 +176,7 @@ $ hana sync
 
 지침 동기화:
   ✅ CLAUDE.md → AGENTS.md
-  ✅ PI.md → AGENTS.md
-  ℹ️  AGENTS.md (Codex/OpenCode 직접 사용)
+  ℹ️  AGENTS.md (Codex/OpenCode/Pi 직접 사용)
 
 완료!
 ```
@@ -189,7 +196,6 @@ $ hana status
 지침:
   AGENTS.md   ✅ 소스
   CLAUDE.md   ✅ 심링크 → AGENTS.md
-  PI.md       ❌ 없음
 ```
 
 ### 옵션
@@ -198,7 +204,7 @@ $ hana status
 |------|------|
 | `--force` | 기존 파일 덮어쓰기 허용 |
 | `--dry-run` | 실제 변경 없이 계획만 출력 |
-| `--global` | 글로벌 스킬도 동기화 |
+| `--global` | `~/.agents/hana.toml` 기준으로 글로벌 동기화 |
 | `--verbose` | 상세 로그 출력 |
 
 ## 범위 밖 (비지원)

@@ -28,9 +28,11 @@ hana는 여러 AI 코딩 에이전트의 스킬과 지침을 하나의 소스에
 Agent Skills 표준(`agentskills.io`)의 경로이자 Codex의 기본 경로를 소스로 사용한다.
 
 ### 지침
-- 프로젝트 레벨: `.agents/instructions.md`
+- 프로젝트 레벨: `AGENTS.md` (루트)
 
-하나의 마크다운 파일을 각 에이전트의 지침 파일명으로 심링크한다.
+`AGENTS.md`는 [오픈 표준](https://agents.md/)으로, Linux Foundation 산하 Agentic AI Foundation에서 관리한다. OpenAI Codex, Google Jules, Cursor, Amp, Factory 등이 공동으로 만들었으며 60k+ 오픈소스 프로젝트가 사용 중이다.
+
+`AGENTS.md`를 소스 오브 트루스로 사용하고, 다른 에이전트 지침 파일은 심링크로 생성한다.
 
 ## 동기화 방식: 심볼릭 링크
 
@@ -63,11 +65,13 @@ Codex는 소스 경로와 동일하므로 심링크를 생성하지 않는다.
 ### 지침 동기화
 
 ```
-.agents/instructions.md  ← 소스 (실제 파일)
-CLAUDE.md                → .agents/instructions.md (심링크)
-AGENTS.md                → .agents/instructions.md (심링크)
-PI.md                    → .agents/instructions.md (심링크)
+AGENTS.md   ← 소스 (실제 파일, 오픈 표준)
+CLAUDE.md   → AGENTS.md (심링크)
+PI.md       → AGENTS.md (심링크)
 ```
+
+Codex와 OpenCode는 `AGENTS.md`를 직접 읽으므로 심링크가 필요 없다.
+모노레포의 경우 하위 디렉토리의 `AGENTS.md`도 동일하게 처리한다.
 
 ## 충돌 처리
 
@@ -102,9 +106,9 @@ PI.md                    → .agents/instructions.md (심링크)
 [skills]
 source = ".agents/skills"
 
-# 지침 소스 파일
+# 지침 소스 파일 (AGENTS.md 오픈 표준)
 [instructions]
-source = ".agents/instructions.md"
+source = "AGENTS.md"
 
 # 동기화 대상 에이전트
 [targets]
@@ -138,9 +142,9 @@ $ hana sync
   🔗 3개 심링크 생성
 
 지침 동기화:
-  ✅ CLAUDE.md → .agents/instructions.md
-  ✅ AGENTS.md → .agents/instructions.md
-  ✅ PI.md → .agents/instructions.md
+  ✅ CLAUDE.md → AGENTS.md
+  ✅ PI.md → AGENTS.md
+  ℹ️  AGENTS.md (Codex/OpenCode 직접 사용)
 
 완료!
 ```
@@ -158,8 +162,8 @@ $ hana status
   new-skill   ✅ claude ✅ codex ⚠️ pi(실제) ❌ opencode
 
 지침:
-  CLAUDE.md   ✅ 심링크
-  AGENTS.md   ✅ 심링크
+  AGENTS.md   ✅ 소스
+  CLAUDE.md   ✅ 심링크 → AGENTS.md
   PI.md       ❌ 없음
 ```
 

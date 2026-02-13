@@ -122,12 +122,12 @@ Pi는 `~/.pi/agent/AGENTS.md`를 글로벌 지침으로 자동 로드한다. 추
 
 ### `hana init`
 
-현재 디렉토리에 hana 설정 파일(`hana.toml`)을 생성한다.
+현재 디렉토리에 `.agents/hana.toml` 설정 파일을 생성한다.
 
-프로젝트 레벨은 `hana.toml`, 글로벌 레벨은 `~/.agents/hana.toml`에 각각 설정한다.
+프로젝트 레벨은 `.agents/hana.toml`, 글로벌 레벨은 `~/.agents/hana.toml`에 각각 설정한다.
 
 ```toml
-# hana.toml (프로젝트 레벨)
+# .agents/hana.toml (프로젝트 레벨)
 
 [skills]
 source = ".agents/skills"
@@ -158,7 +158,7 @@ instructions = true
 
 ### `hana sync`
 
-1. 설정 파일(`hana.toml`) 읽기
+1. 설정 파일(`.agents/hana.toml`) 읽기
 2. 역방향 수집: 각 에이전트 경로에서 새 스킬 감지 → 소스로 이동
 3. 정방향 동기화: 소스에서 각 에이전트 경로로 심링크 생성
 4. 지침 동기화: 소스 지침 파일을 각 에이전트 지침 파일명으로 심링크

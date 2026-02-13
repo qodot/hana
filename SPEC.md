@@ -81,24 +81,22 @@ Codex, OpenCode, Pi는 `AGENTS.md`를 직접 읽으므로 심링크가 필요 �
 | Claude Code | `~/.claude/CLAUDE.md` | 심링크 (파일명 다름) |
 | Codex | `~/.codex/AGENTS.md` | 심링크 |
 | OpenCode | `~/.config/opencode/AGENTS.md` | 심링크 |
-| Pi | `~/.pi/agent/APPEND_SYSTEM.md` | 심링크 |
+| Pi | `~/.pi/agent/AGENTS.md` | 심링크 |
 
 ```
 ~/.agents/AGENTS.md              ← 소스 (실제 파일)
 ~/.claude/CLAUDE.md              → ~/.agents/AGENTS.md (심링크)
 ~/.codex/AGENTS.md               → ~/.agents/AGENTS.md (심링크)
 ~/.config/opencode/AGENTS.md     → ~/.agents/AGENTS.md (심링크)
-~/.pi/agent/APPEND_SYSTEM.md     → ~/.agents/AGENTS.md (심링크)
+~/.pi/agent/AGENTS.md            → ~/.agents/AGENTS.md (심링크)
 ```
 
 #### Pi 글로벌 지침 참고
 
-Pi는 전용 글로벌 지침 파일이 없다. 대신 다음 메커니즘을 사용한다:
-- `~/.pi/agent/SYSTEM.md`: 시스템 프롬프트 **전체 교체** (hana에서는 사용하지 않음)
-- `~/.pi/agent/APPEND_SYSTEM.md`: 시스템 프롬프트에 **추가**
-- Pi는 프로젝트 루트의 `AGENTS.md`, `CLAUDE.md`도 컨텍스트 파일로 자동 로드
-
-`APPEND_SYSTEM.md`에 심링크하면 `AGENTS.md` 내용이 시스템 프롬프트에 추가되는 형태로 반영된다. 다른 에이전트처럼 독립 파일로 로드되는 것이 아니라 프롬프트에 직접 삽입되므로, 같은 내용이지만 전달 방식이 다르다는 점에 유의.
+Pi는 `~/.pi/agent/AGENTS.md`를 글로벌 지침으로 자동 로드한다. 추가로 다음 커스터마이징 메커니즘도 지원한다:
+- `~/.pi/agent/SYSTEM.md`: 시스템 프롬프트 전체 교체
+- `~/.pi/agent/APPEND_SYSTEM.md`: 시스템 프롬프트에 추가
+- 참고: [Pi README](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
 
 ## 충돌 처리
 

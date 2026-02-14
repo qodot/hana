@@ -4,88 +4,19 @@ use std::path::{Path, PathBuf};
 
 use crate::agents;
 use crate::config::Config;
-use crate::error::{SyncOk, SyncWarning};
+use crate::error::{SyncError, SyncOk, SyncWarning};
 
-pub fn run(opts: &SyncOptions) -> Result<(), i32> {
+pub fn run(opts: &SyncOptions) -> Result<SyncOk, SyncError> {
     let base_dir = if opts.global {
-        dirs::home_dir().ok_or_else(|| {
-            eprintln!("🌸 홈 디렉토리를 찾을 수 없습니다.");
-            1
-        })?
+        dirs::home_dir().ok_or(SyncError::NoHomeDir)?
     } else {
         PathBuf::from(".")
     };
 
     let config_path = base_dir.join(".agents/hana.toml");
+    let config = Config::load(&config_path)?;
 
-    let config = Config::load(&config_path).map_err(|e| {
-        eprintln!("🌸 {e}");
-        eprintln!("   hana init 으로 설정 파일을 먼저 생성하세요.");
-        1
-    })?;
-
-    if opts.dry_run {
-        println!("🌸 hana sync (dry-run)\n");
-    } else {
-        println!("🌸 hana sync\n");
-    }
-
-    let result = execute(&config, &base_dir, opts);
-
-    // 스킬 수집
-    for (name, agent) in &result.skills_collected {
-        println!("  🆕 {name} ({agent}에서 수집)");
-    }
-
-    // 스킬 심링크
-    if !result.skills_linked.is_empty() {
-        println!("스킬 동기화:");
-        let mut by_skill: HashMap<&str, Vec<&str>> = HashMap::new();
-        for (skill, agent) in &result.skills_linked {
-            by_skill.entry(skill).or_default().push(agent);
-        }
-        for (skill, agents) in &by_skill {
-            println!("  ✅ {skill} → {}", agents.join(", "));
-        }
-    }
-
-    // 지침 동기화
-    if !result.instructions_linked.is_empty() || !result.instructions_skipped.is_empty() {
-        println!("지침 동기화:");
-        for agent in &result.instructions_linked {
-            println!("  ✅ {agent}");
-        }
-        if !result.instructions_skipped.is_empty() {
-            println!(
-                "  ℹ️  AGENTS.md ({} 직접 사용)",
-                result.instructions_skipped.join(", ")
-            );
-        }
-    }
-
-    // 정리
-    if !result.cleaned.is_empty() {
-        println!("정리:");
-        for path in &result.cleaned {
-            println!("  🗑️  {}", path.display());
-        }
-    }
-
-    // 에러
-    for warn in &result.warnings {
-        eprintln!("  ⚠️  {warn}");
-    }
-
-    if result.skills_linked.is_empty()
-        && result.skills_collected.is_empty()
-        && result.instructions_linked.is_empty()
-        && result.cleaned.is_empty()
-    {
-        println!("변경 없음. 모두 동기화 상태입니다.");
-    }
-
-    println!("\n완료!");
-    Ok(())
+    Ok(execute(&config, &base_dir, opts))
 }
 
 // 경로 매핑은 agents 모듈에서 관리

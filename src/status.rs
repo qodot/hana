@@ -3,30 +3,19 @@ use std::path::{Path, PathBuf};
 
 use crate::agents;
 use crate::config::Config;
-use crate::error::{InstructionState, InstructionStatusEntry, SkillState, SkillStatusEntry, StatusOk};
+use crate::error::{InstructionState, InstructionStatusEntry, SkillState, SkillStatusEntry, StatusError, StatusOk};
 
-pub fn run(is_global: bool) -> Result<(), i32> {
-
+pub fn run(is_global: bool) -> Result<StatusOk, StatusError> {
     let base_dir = if is_global {
-        dirs::home_dir().ok_or_else(|| {
-            eprintln!("🌸 홈 디렉토리를 찾을 수 없습니다.");
-            1
-        })?
+        dirs::home_dir().ok_or(StatusError::NoHomeDir)?
     } else {
         PathBuf::from(".")
     };
 
     let config_path = base_dir.join(".agents/hana.toml");
+    let config = Config::load(&config_path)?;
 
-    let config = Config::load(&config_path).map_err(|e| {
-        eprintln!("🌸 {e}");
-        eprintln!("   hana init 으로 설정 파일을 먼저 생성하세요.");
-        1
-    })?;
-
-    let result = execute(&config, &base_dir, is_global);
-    print!("{}", format_result(&result));
-    Ok(())
+    Ok(execute(&config, &base_dir, is_global))
 }
 
 pub fn format_result(result: &StatusOk) -> String {

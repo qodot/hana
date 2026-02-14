@@ -57,14 +57,11 @@ pub enum SyncWarning {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum SyncError {
     /// 설정 파일 로딩 실패
     Config(ConfigError),
     /// 홈 디렉토리를 찾을 수 없음
     NoHomeDir,
-    /// 파일시스템 작업 실패
-    Io { operation: String, source: std::io::Error },
 }
 
 // === Status ===
@@ -107,7 +104,6 @@ pub struct InstructionStatusEntry {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum StatusError {
     /// 설정 파일 로딩 실패
     Config(ConfigError),
@@ -169,7 +165,6 @@ impl std::fmt::Display for SyncError {
         match self {
             Self::Config(e) => write!(f, "{e}"),
             Self::NoHomeDir => write!(f, "홈 디렉토리를 찾을 수 없습니다."),
-            Self::Io { operation, source } => write!(f, "{operation}: {source}"),
         }
     }
 }

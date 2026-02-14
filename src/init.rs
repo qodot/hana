@@ -109,31 +109,14 @@ pub fn execute(opts: &InitOptions, base_dir: &Path) -> Result<InitOk, InitError>
     Ok(InitOk::Created { path: config_path })
 }
 
-pub fn run(opts: &InitOptions) -> Result<(), i32> {
+pub fn run(opts: &InitOptions) -> Result<InitOk, InitError> {
     let base_dir = if opts.global {
-        dirs::home_dir().ok_or_else(|| {
-            eprintln!("🌸 {}", InitError::NoHomeDir);
-            1
-        })?
+        dirs::home_dir().ok_or(InitError::NoHomeDir)?
     } else {
         PathBuf::from(".")
     };
 
-    match execute(&opts, &base_dir) {
-        Ok(InitOk::Created { path }) => {
-            println!("🌸 생성 완료: {}", path.display());
-            Ok(())
-        }
-        Ok(InitOk::DryRun { path, content }) => {
-            println!("🌸 {path} 에 생성될 내용:\n");
-            print!("{content}");
-            Ok(())
-        }
-        Err(e) => {
-            eprintln!("🌸 {e}");
-            Err(1)
-        }
-    }
+    execute(opts, &base_dir)
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::agents;
 use crate::config::Config;
+use crate::error::{InstructionState, InstructionStatusEntry, SkillState, SkillStatusEntry, StatusOk};
 
 pub fn run(args: &[String]) -> Result<(), i32> {
     let is_global = args.iter().any(|a| a == "--global");
@@ -29,46 +30,64 @@ pub fn run(args: &[String]) -> Result<(), i32> {
     Ok(())
 }
 
+pub fn format_result(result: &StatusOk) -> String {
+    let mut out = String::from("🌸 hana status\n");
+
+    // 스킬
+    if result.skills.is_empty() {
+        out.push_str("\n스킬: (없음)\n");
+    } else {
+        out.push_str("\n스킬:\n");
+        for skill in &result.skills {
+            let states: Vec<String> = skill
+                .agents
+                .iter()
+                .map(|(agent, state)| match state {
+                    SkillState::Synced => format!("✅ {agent}"),
+                    SkillState::RealDir => format!("⚠️ {agent}(실제)"),
+                    SkillState::BrokenSymlink => format!("💔 {agent}(깨짐)"),
+                    SkillState::Missing => format!("❌ {agent}"),
+                    SkillState::WrongTarget => format!("⚠️ {agent}(다른 타겟)"),
+                })
+                .collect();
+            out.push_str(&format!("  {}  {}\n", skill.name, states.join(" ")));
+        }
+    }
+
+    // 지침
+    out.push_str("\n지침:\n");
+    if result.instructions.source_exists {
+        out.push_str(&format!("  {}  ✅ 소스\n", result.instructions.source));
+    } else {
+        out.push_str(&format!("  {}  ❌ 소스 없음\n", result.instructions.source));
+    }
+    for (agent, state) in &result.instructions.agents {
+        match state {
+            InstructionState::Synced => {
+                out.push_str(&format!("  {agent}  ✅ 심링크\n"));
+            }
+            InstructionState::DirectRead => {
+                out.push_str(&format!("  {agent}  ℹ️  직접 읽음\n"));
+            }
+            InstructionState::RealFile => {
+                out.push_str(&format!("  {agent}  ⚠️ 실제 파일 (충돌)\n"));
+            }
+            InstructionState::Missing => {
+                out.push_str(&format!("  {agent}  ❌ 없음\n"));
+            }
+            InstructionState::Disabled => {
+                out.push_str(&format!("  {agent}  ⏭️  비활성화\n"));
+            }
+        }
+    }
+
+    out
+}
+
 // 경로 매핑은 agents 모듈에서 관리
+// 타입은 error 모듈에서 관리
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum SkillState {
-    Synced,          // 올바른 심링크
-    RealDir,         // 실제 디렉토리 (수집 대상)
-    BrokenSymlink,   // 깨진 심링크
-    Missing,         // 없음
-    WrongTarget,     // 심링크지만 타겟이 다름
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum InstructionState {
-    Synced,          // 올바른 심링크
-    DirectRead,      // 에이전트가 직접 읽음 (심링크 불필요)
-    RealFile,        // 실제 파일 (충돌)
-    Missing,         // 없음
-    Disabled,        // 설정에서 비활성화
-}
-
-#[derive(Debug)]
-pub struct SkillStatus {
-    pub name: String,
-    pub agents: Vec<(String, SkillState)>,
-}
-
-#[derive(Debug)]
-pub struct InstructionStatus {
-    pub source: String,
-    pub source_exists: bool,
-    pub agents: Vec<(String, InstructionState)>,
-}
-
-#[derive(Debug)]
-pub struct StatusResult {
-    pub skills: Vec<SkillStatus>,
-    pub instructions: InstructionStatus,
-}
-
-pub fn execute(config: &Config, base_dir: &Path, global: bool) -> StatusResult {
+pub fn execute(config: &Config, base_dir: &Path, global: bool) -> StatusOk {
     let source_dir = base_dir.join(&config.skills_source);
 
     // 소스 스킬 목록
@@ -103,7 +122,7 @@ pub fn execute(config: &Config, base_dir: &Path, global: bool) -> StatusResult {
                     Some((agent.to_string(), state))
                 })
                 .collect();
-            SkillStatus {
+            SkillStatusEntry {
                 name: name.clone(),
                 agents: agent_states,
             }
@@ -157,9 +176,9 @@ pub fn execute(config: &Config, base_dir: &Path, global: bool) -> StatusResult {
         })
         .collect();
 
-    StatusResult {
+    StatusOk {
         skills,
-        instructions: InstructionStatus {
+        instructions: InstructionStatusEntry {
             source: config.instructions_source.clone(),
             source_exists,
             agents: instruction_agents,
@@ -185,60 +204,6 @@ fn check_skill_state(link_path: &Path, expected_target: &Path) -> SkillState {
     } else {
         SkillState::Missing
     }
-}
-
-pub fn format_result(result: &StatusResult) -> String {
-    let mut out = String::from("🌸 hana status\n");
-
-    // 스킬
-    if result.skills.is_empty() {
-        out.push_str("\n스킬: (없음)\n");
-    } else {
-        out.push_str("\n스킬:\n");
-        for skill in &result.skills {
-            let states: Vec<String> = skill
-                .agents
-                .iter()
-                .map(|(agent, state)| match state {
-                    SkillState::Synced => format!("✅ {agent}"),
-                    SkillState::RealDir => format!("⚠️ {agent}(실제)"),
-                    SkillState::BrokenSymlink => format!("💔 {agent}(깨짐)"),
-                    SkillState::Missing => format!("❌ {agent}"),
-                    SkillState::WrongTarget => format!("⚠️ {agent}(다른 타겟)"),
-                })
-                .collect();
-            out.push_str(&format!("  {}  {}\n", skill.name, states.join(" ")));
-        }
-    }
-
-    // 지침
-    out.push_str("\n지침:\n");
-    if result.instructions.source_exists {
-        out.push_str(&format!("  {}  ✅ 소스\n", result.instructions.source));
-    } else {
-        out.push_str(&format!("  {}  ❌ 소스 없음\n", result.instructions.source));
-    }
-    for (agent, state) in &result.instructions.agents {
-        match state {
-            InstructionState::Synced => {
-                out.push_str(&format!("  {agent}  ✅ 심링크\n"));
-            }
-            InstructionState::DirectRead => {
-                out.push_str(&format!("  {agent}  ℹ️  직접 읽음\n"));
-            }
-            InstructionState::RealFile => {
-                out.push_str(&format!("  {agent}  ⚠️ 실제 파일 (충돌)\n"));
-            }
-            InstructionState::Missing => {
-                out.push_str(&format!("  {agent}  ❌ 없음\n"));
-            }
-            InstructionState::Disabled => {
-                out.push_str(&format!("  {agent}  ⏭️  비활성화\n"));
-            }
-        }
-    }
-
-    out
 }
 
 #[cfg(test)]
@@ -401,15 +366,15 @@ mod tests {
 
     #[test]
     fn test_format_result_output() {
-        let result = StatusResult {
-            skills: vec![SkillStatus {
+        let result = StatusOk {
+            skills: vec![SkillStatusEntry {
                 name: "my-skill".to_string(),
                 agents: vec![
                     ("claude".to_string(), SkillState::Synced),
                     ("pi".to_string(), SkillState::Missing),
                 ],
             }],
-            instructions: InstructionStatus {
+            instructions: InstructionStatusEntry {
                 source: "AGENTS.md".to_string(),
                 source_exists: true,
                 agents: vec![

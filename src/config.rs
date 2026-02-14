@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+use crate::error::ConfigError;
+
 #[derive(Debug, Clone)]
 pub struct TargetConfig {
     pub skills: bool,
@@ -39,16 +41,20 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn load(path: &Path) -> Result<Self, String> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| format!("설정 파일을 읽을 수 없습니다: {e}"))?;
+    pub fn load(path: &Path) -> Result<Self, ConfigError> {
+        let content = fs::read_to_string(path).map_err(|e| ConfigError::ReadFile {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
         Self::parse(&content)
     }
 
-    pub fn parse(content: &str) -> Result<Self, String> {
+    pub fn parse(content: &str) -> Result<Self, ConfigError> {
         let table: toml::Table = content
             .parse()
-            .map_err(|e| format!("TOML 파싱 실패: {e}"))?;
+            .map_err(|e: toml::de::Error| ConfigError::Parse {
+                message: e.to_string(),
+            })?;
 
         let skills_source = table
             .get("skills")
@@ -155,11 +161,19 @@ source = "AGENTS.md"
     fn test_parse_invalid_toml() {
         let result = Config::parse("not valid [[[toml");
         assert!(result.is_err());
+        match result.unwrap_err() {
+            ConfigError::Parse { .. } => {}
+            other => panic!("expected Parse, got {other:?}"),
+        }
     }
 
     #[test]
     fn test_load_missing_file() {
         let result = Config::load(Path::new("/nonexistent/hana.toml"));
         assert!(result.is_err());
+        match result.unwrap_err() {
+            ConfigError::ReadFile { .. } => {}
+            other => panic!("expected ReadFile, got {other:?}"),
+        }
     }
 }

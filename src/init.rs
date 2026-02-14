@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::error::{InitError, InitOk};
+
 pub const DEFAULT_CONFIG: &str = r#"# hana - AI 코딩 에이전트 동기화 설정
 # https://github.com/qodot/hana
 
@@ -43,41 +45,42 @@ impl InitOptions {
     }
 }
 
-/// init 실행. base_dir을 받아서 테스트 가능하게 함.
-pub fn execute(opts: &InitOptions, base_dir: &Path) -> Result<String, String> {
+pub fn execute(opts: &InitOptions, base_dir: &Path) -> Result<InitOk, InitError> {
     if opts.dry_run {
         let path = if opts.global {
             "~/.agents/hana.toml"
         } else {
             ".agents/hana.toml"
         };
-        return Ok(format!("🌸 {path} 에 생성될 내용:\n\n{DEFAULT_CONFIG}"));
+        return Ok(InitOk::DryRun {
+            path: path.to_string(),
+            content: DEFAULT_CONFIG.to_string(),
+        });
     }
 
-    let config_path = if opts.global {
-        base_dir.join(".agents").join("hana.toml")
-    } else {
-        base_dir.join(".agents").join("hana.toml")
-    };
+    let config_path = base_dir.join(".agents").join("hana.toml");
 
     if config_path.exists() && !opts.force {
-        return Err(format!(
-            "🌸 이미 존재합니다: {}\n   덮어쓰려면 --force 옵션을 사용하세요.",
-            config_path.display()
-        ));
+        return Err(InitError::AlreadyExists {
+            path: config_path,
+        });
     }
 
     if let Some(parent) = config_path.parent() {
         if !parent.exists() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("🌸 디렉토리 생성 실패: {e}"))?;
+            fs::create_dir_all(parent).map_err(|e| InitError::CreateDir {
+                path: parent.to_path_buf(),
+                source: e,
+            })?;
         }
     }
 
-    fs::write(&config_path, DEFAULT_CONFIG)
-        .map_err(|e| format!("🌸 파일 생성 실패: {e}"))?;
+    fs::write(&config_path, DEFAULT_CONFIG).map_err(|e| InitError::WriteFile {
+        path: config_path.clone(),
+        source: e,
+    })?;
 
-    Ok(format!("🌸 생성 완료: {}", config_path.display()))
+    Ok(InitOk::Created { path: config_path })
 }
 
 pub fn run(args: &[String]) -> Result<(), i32> {
@@ -85,7 +88,7 @@ pub fn run(args: &[String]) -> Result<(), i32> {
 
     let base_dir = if opts.global {
         dirs::home_dir().ok_or_else(|| {
-            eprintln!("🌸 홈 디렉토리를 찾을 수 없습니다.");
+            eprintln!("🌸 {}", InitError::NoHomeDir);
             1
         })?
     } else {
@@ -93,15 +96,17 @@ pub fn run(args: &[String]) -> Result<(), i32> {
     };
 
     match execute(&opts, &base_dir) {
-        Ok(msg) => {
-            print!("{msg}");
-            if !msg.ends_with('\n') {
-                println!();
-            }
+        Ok(InitOk::Created { path }) => {
+            println!("🌸 생성 완료: {}", path.display());
             Ok(())
         }
-        Err(msg) => {
-            eprintln!("{msg}");
+        Ok(InitOk::DryRun { path, content }) => {
+            println!("🌸 {path} 에 생성될 내용:\n");
+            print!("{content}");
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("🌸 {e}");
             Err(1)
         }
     }
@@ -110,7 +115,6 @@ pub fn run(args: &[String]) -> Result<(), i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use tempfile::TempDir;
 
     fn opts(global: bool, force: bool, dry_run: bool) -> InitOptions {
@@ -125,7 +129,7 @@ mod tests {
     fn test_init_creates_config() {
         let tmp = TempDir::new().unwrap();
         let result = execute(&opts(false, false, false), tmp.path());
-        assert!(result.is_ok());
+        assert!(matches!(result, Ok(InitOk::Created { .. })));
 
         let config = tmp.path().join(".agents").join("hana.toml");
         assert!(config.exists());
@@ -140,8 +144,7 @@ mod tests {
         fs::write(agents_dir.join("hana.toml"), "existing").unwrap();
 
         let result = execute(&opts(false, false, false), tmp.path());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("이미 존재합니다"));
+        assert!(matches!(result, Err(InitError::AlreadyExists { .. })));
     }
 
     #[test]
@@ -152,7 +155,7 @@ mod tests {
         fs::write(agents_dir.join("hana.toml"), "old content").unwrap();
 
         let result = execute(&opts(false, true, false), tmp.path());
-        assert!(result.is_ok());
+        assert!(matches!(result, Ok(InitOk::Created { .. })));
 
         let content = fs::read_to_string(agents_dir.join("hana.toml")).unwrap();
         assert_eq!(content, DEFAULT_CONFIG);
@@ -162,13 +165,13 @@ mod tests {
     fn test_init_dry_run() {
         let tmp = TempDir::new().unwrap();
         let result = execute(&opts(false, false, true), tmp.path());
-        assert!(result.is_ok());
+        assert!(matches!(result, Ok(InitOk::DryRun { .. })));
 
-        let msg = result.unwrap();
-        assert!(msg.contains(".agents/hana.toml"));
-        assert!(msg.contains(DEFAULT_CONFIG));
+        if let Ok(InitOk::DryRun { path, content }) = result {
+            assert!(path.contains("hana.toml"));
+            assert_eq!(content, DEFAULT_CONFIG);
+        }
 
-        // 파일이 생성되지 않아야 함
         assert!(!tmp.path().join(".agents").join("hana.toml").exists());
     }
 
@@ -176,7 +179,7 @@ mod tests {
     fn test_init_global_uses_base_dir() {
         let tmp = TempDir::new().unwrap();
         let result = execute(&opts(true, false, false), tmp.path());
-        assert!(result.is_ok());
+        assert!(matches!(result, Ok(InitOk::Created { .. })));
 
         let config = tmp.path().join(".agents").join("hana.toml");
         assert!(config.exists());

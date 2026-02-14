@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::agents;
 use crate::config::Config;
+use crate::error::{SyncOk, SyncWarning};
 
 pub fn run(args: &[String]) -> Result<(), i32> {
     let is_global = args.iter().any(|a| a == "--global");
@@ -80,8 +81,8 @@ pub fn run(args: &[String]) -> Result<(), i32> {
     }
 
     // 에러
-    for err in &result.errors {
-        eprintln!("  ⚠️  {err}");
+    for warn in &result.warnings {
+        eprintln!("  ⚠️  {warn}");
     }
 
     if result.skills_linked.is_empty()
@@ -106,18 +107,15 @@ pub struct SyncOptions {
     pub global: bool,
 }
 
-#[derive(Debug, Default)]
-pub struct SyncResult {
-    pub skills_linked: Vec<(String, String)>,   // (skill_name, agent)
-    pub skills_collected: Vec<(String, String)>, // (skill_name, from_agent)
-    pub instructions_linked: Vec<String>,        // agent names
-    pub instructions_skipped: Vec<String>,       // agent names (직접 읽음)
-    pub cleaned: Vec<PathBuf>,                   // 제거된 깨진 심링크
-    pub errors: Vec<String>,
-}
-
-pub fn execute(config: &Config, base_dir: &Path, opts: &SyncOptions) -> SyncResult {
-    let mut result = SyncResult::default();
+pub fn execute(config: &Config, base_dir: &Path, opts: &SyncOptions) -> SyncOk {
+    let mut result = SyncOk {
+        skills_linked: vec![],
+        skills_collected: vec![],
+        instructions_linked: vec![],
+        instructions_skipped: vec![],
+        cleaned: vec![],
+        warnings: vec![],
+    };
 
     // 1. 스킬 동기화
     sync_skills(config, base_dir, opts, &mut result);
@@ -128,7 +126,7 @@ pub fn execute(config: &Config, base_dir: &Path, opts: &SyncOptions) -> SyncResu
     result
 }
 
-fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions, result: &mut SyncResult) {
+fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions, result: &mut SyncOk) {
     let source_dir = base_dir.join(&config.skills_source);
 
     if !source_dir.exists() {
@@ -165,11 +163,11 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions, result: &mu
     // 충돌 감지: 같은 이름이 여러 에이전트에서 발견
     for (name, sources) in &new_skills {
         if sources.len() > 1 {
-            let agents: Vec<&str> = sources.iter().map(|(a, _)| a.as_str()).collect();
-            result.errors.push(format!(
-                "스킬 이름 충돌: '{name}' 이(가) 여러 에이전트에서 발견됨 ({}). 수동으로 해결하세요.",
-                agents.join(", ")
-            ));
+            let agent_names: Vec<String> = sources.iter().map(|(a, _)| a.clone()).collect();
+            result.warnings.push(SyncWarning::SkillConflict {
+                name: name.clone(),
+                agents: agent_names,
+            });
             continue;
         }
 
@@ -178,15 +176,17 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions, result: &mu
 
         if !opts.dry_run {
             if let Err(e) = fs::rename(path, &dest) {
-                result
-                    .errors
-                    .push(format!("스킬 수집 실패 ({name}, {agent}): {e}"));
+                result.warnings.push(SyncWarning::IoFailed {
+                    operation: format!("스킬 수집 ({name}, {agent})"),
+                    detail: e.to_string(),
+                });
                 continue;
             }
             if let Err(e) = std::os::unix::fs::symlink(&dest, path) {
-                result
-                    .errors
-                    .push(format!("심링크 생성 실패 ({name}, {agent}): {e}"));
+                result.warnings.push(SyncWarning::IoFailed {
+                    operation: format!("심링크 생성 ({name}, {agent})"),
+                    detail: e.to_string(),
+                });
                 continue;
             }
         }
@@ -236,9 +236,10 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions, result: &mu
                         }
                     }
                 } else {
-                    result.errors.push(format!(
-                        "충돌: {skill} ({agent}) 에 실제 파일/디렉토리가 존재합니다. --force로 덮어쓰세요."
-                    ));
+                    result.warnings.push(SyncWarning::FileConflict {
+                        skill: skill.clone(),
+                        agent: agent.to_string(),
+                    });
                     continue;
                 }
             }
@@ -252,9 +253,10 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions, result: &mu
                     let _ = fs::remove_file(&link_path);
                 }
                 if let Err(e) = std::os::unix::fs::symlink(&target_path, &link_path) {
-                    result
-                        .errors
-                        .push(format!("심링크 생성 실패 ({skill}, {agent}): {e}"));
+                    result.warnings.push(SyncWarning::IoFailed {
+                        operation: format!("심링크 생성 ({skill}, {agent})"),
+                        detail: e.to_string(),
+                    });
                     continue;
                 }
             }
@@ -282,7 +284,7 @@ fn sync_instructions(
     config: &Config,
     base_dir: &Path,
     opts: &SyncOptions,
-    result: &mut SyncResult,
+    result: &mut SyncOk,
 ) {
     let source_path = base_dir.join(&config.instructions_source);
     if !source_path.exists() {
@@ -330,7 +332,7 @@ fn sync_instruction_link(
     display_name: &str,
     agent: &str,
     opts: &SyncOptions,
-    result: &mut SyncResult,
+    result: &mut SyncOk,
 ) {
     // 이미 올바른 심링크면 스킵
     if link_path.is_symlink() {
@@ -348,9 +350,9 @@ fn sync_instruction_link(
                 let _ = fs::remove_file(link_path);
             }
         } else {
-            result.errors.push(format!(
-                "{display_name} 가 이미 존재합니다 (심링크가 아님). --force로 덮어쓰세요."
-            ));
+            result.warnings.push(SyncWarning::InstructionConflict {
+                file: display_name.to_string(),
+            });
             return;
         }
     }
@@ -364,9 +366,10 @@ fn sync_instruction_link(
             let _ = fs::remove_file(link_path);
         }
         if let Err(e) = std::os::unix::fs::symlink(source_path, link_path) {
-            result
-                .errors
-                .push(format!("지침 심링크 실패 ({display_name}): {e}"));
+            result.warnings.push(SyncWarning::IoFailed {
+                operation: format!("지침 심링크 ({display_name})"),
+                detail: e.to_string(),
+            });
             return;
         }
     }
@@ -413,7 +416,7 @@ mod tests {
         assert!(tmp.path().join(".opencode/skills/my-skill").is_symlink());
         assert!(!tmp.path().join(".agents/skills/my-skill").is_symlink());
         assert!(result.skills_linked.len() >= 3);
-        assert!(result.errors.is_empty());
+        assert!(result.warnings.is_empty());
     }
 
     #[test]
@@ -530,13 +533,11 @@ mod tests {
 
         let result = execute(&default_config(), tmp.path(), &default_opts());
 
-        // 충돌 에러 발생
-        let conflict_errors: Vec<_> = result
-            .errors
-            .iter()
-            .filter(|e| e.contains("충돌") && e.contains("conflict-skill"))
-            .collect();
-        assert!(!conflict_errors.is_empty());
+        // 충돌 경고 발생
+        assert!(result.warnings.iter().any(|w| matches!(
+            w,
+            SyncWarning::SkillConflict { name, .. } if name == "conflict-skill"
+        )));
 
         // 소스로 이동되지 않아야 함
         assert!(!tmp.path().join(".agents/skills/conflict-skill").exists());
@@ -554,13 +555,11 @@ mod tests {
 
         let result = execute(&default_config(), tmp.path(), &default_opts());
 
-        // 에러 발생
-        let conflict_errors: Vec<_> = result
-            .errors
-            .iter()
-            .filter(|e| e.contains("충돌") && e.contains("my-skill"))
-            .collect();
-        assert!(!conflict_errors.is_empty());
+        // 경고 발생
+        assert!(result.warnings.iter().any(|w| matches!(
+            w,
+            SyncWarning::FileConflict { skill, .. } if skill == "my-skill"
+        )));
     }
 
     #[test]
@@ -583,7 +582,7 @@ mod tests {
 
         // 심링크로 대체됨
         assert!(tmp.path().join(".claude/skills/my-skill").is_symlink());
-        assert!(result.errors.is_empty());
+        assert!(result.warnings.is_empty());
     }
 
     // === 지침 동기화 ===
@@ -625,8 +624,11 @@ mod tests {
 
         let result = execute(&default_config(), tmp.path(), &default_opts());
 
-        assert!(!result.errors.is_empty());
-        assert!(result.errors[0].contains("CLAUDE.md"));
+        assert!(!result.warnings.is_empty());
+        assert!(matches!(
+            &result.warnings[0],
+            SyncWarning::InstructionConflict { file } if file == "CLAUDE.md"
+        ));
     }
 
     #[test]
@@ -642,7 +644,7 @@ mod tests {
         let result = execute(&default_config(), tmp.path(), &opts);
 
         assert!(tmp.path().join("CLAUDE.md").is_symlink());
-        assert!(result.errors.is_empty());
+        assert!(result.warnings.is_empty());
     }
 
     // === 글로벌 지침 동기화 ===
@@ -713,7 +715,7 @@ mod tests {
         let result = execute(&default_config(), tmp.path(), &default_opts());
 
         assert!(result.skills_linked.is_empty());
-        assert!(result.errors.is_empty());
+        assert!(result.warnings.is_empty());
     }
 
     #[test]

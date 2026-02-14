@@ -275,7 +275,7 @@ mod tests {
 
         // sync 실행
         let config = default_config();
-        crate::sync::execute(&config, tmp.path(), false);
+        crate::sync::execute(&config, tmp.path(), &crate::sync::SyncOptions::default());
 
         let result = execute(&config, tmp.path());
 
@@ -348,7 +348,7 @@ mod tests {
         setup_source(tmp.path());
 
         let config = default_config();
-        crate::sync::execute(&config, tmp.path(), false);
+        crate::sync::execute(&config, tmp.path(), &crate::sync::SyncOptions::default());
 
         let result = execute(&config, tmp.path());
 

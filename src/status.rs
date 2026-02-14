@@ -1,7 +1,32 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::config::Config;
+
+pub fn run(args: &[String]) -> Result<(), i32> {
+    let is_global = args.iter().any(|a| a == "--global");
+
+    let base_dir = if is_global {
+        dirs::home_dir().ok_or_else(|| {
+            eprintln!("🌸 홈 디렉토리를 찾을 수 없습니다.");
+            1
+        })?
+    } else {
+        PathBuf::from(".")
+    };
+
+    let config_path = base_dir.join(".agents/hana.toml");
+
+    let config = Config::load(&config_path).map_err(|e| {
+        eprintln!("🌸 {e}");
+        eprintln!("   hana init 으로 설정 파일을 먼저 생성하세요.");
+        1
+    })?;
+
+    let result = execute(&config, &base_dir);
+    print!("{}", format_result(&result));
+    Ok(())
+}
 
 /// 에이전트별 스킬 경로 (sync.rs와 동일)
 fn skill_path(agent: &str) -> Option<&'static str> {

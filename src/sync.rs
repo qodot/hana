@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::agents;
 use crate::config::Config;
 
 pub fn run(args: &[String]) -> Result<(), i32> {
@@ -95,56 +96,7 @@ pub fn run(args: &[String]) -> Result<(), i32> {
     Ok(())
 }
 
-/// 에이전트별 스킬 경로 매핑 (프로젝트 레벨)
-fn skill_path_project(agent: &str) -> Option<&'static str> {
-    match agent {
-        "claude" => Some(".claude/skills"),
-        "codex" => Some(".agents/skills"),
-        "pi" => Some(".pi/skills"),
-        "opencode" => Some(".opencode/skills"),
-        _ => None,
-    }
-}
-
-/// 에이전트별 스킬 경로 매핑 (글로벌 레벨)
-fn skill_path_global(agent: &str) -> Option<&'static str> {
-    match agent {
-        "claude" => Some(".claude/skills"),
-        "codex" => Some(".agents/skills"),
-        "pi" => Some(".pi/agent/skills"),
-        "opencode" => Some(".config/opencode/skills"),
-        _ => None,
-    }
-}
-
-/// 에이전트별 지침 파일명 매핑 (프로젝트 레벨)
-/// None이면 AGENTS.md를 직접 읽으므로 심링크 불필요
-fn instruction_file_project(agent: &str) -> Option<&'static str> {
-    match agent {
-        "claude" => Some("CLAUDE.md"),
-        _ => None,
-    }
-}
-
-/// 에이전트별 지침 파일 경로 (글로벌 레벨)
-/// None이면 심링크 불필요 (해당 에이전트가 소스를 직접 읽지 않는 한)
-fn instruction_file_global(agent: &str) -> Option<&'static str> {
-    match agent {
-        "claude" => Some(".claude/CLAUDE.md"),
-        "codex" => Some(".codex/AGENTS.md"),
-        "opencode" => Some(".config/opencode/AGENTS.md"),
-        "pi" => Some(".pi/agent/AGENTS.md"),
-        _ => None,
-    }
-}
-
-fn skill_path(agent: &str, global: bool) -> Option<&'static str> {
-    if global {
-        skill_path_global(agent)
-    } else {
-        skill_path_project(agent)
-    }
-}
+// 경로 매핑은 agents 모듈에서 관리
 
 
 #[derive(Debug, Default)]
@@ -185,17 +137,11 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions, result: &mu
 
     // 1단계: 역방향 수집 (모든 에이전트에서)
     // 동일한 이름이 여러 에이전트에 있으면 충돌 감지
+    let skill_targets = agents::collect_skills(opts.global, &config.skills_source);
     let mut new_skills: HashMap<String, Vec<(String, PathBuf)>> = HashMap::new(); // name → [(agent, path)]
 
-    for (agent, target_config) in &config.targets {
-        if !target_config.skills {
-            continue;
-        }
-        let agent_skill_dir = match skill_path(agent, opts.global) {
-            Some(p) => p,
-            None => continue,
-        };
-        if agent_skill_dir == config.skills_source {
+    for &(agent, agent_skill_dir) in &skill_targets {
+        if !config.targets.get(agent).map(|t| t.skills).unwrap_or(false) {
             continue;
         }
         let agent_dir = base_dir.join(agent_skill_dir);
@@ -210,7 +156,7 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions, result: &mu
                     new_skills
                         .entry(name)
                         .or_default()
-                        .push((agent.clone(), path));
+                        .push((agent.to_string(), path));
                 }
             }
         }
@@ -246,7 +192,7 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions, result: &mu
         }
         result
             .skills_collected
-            .push((name.clone(), agent.clone()));
+            .push((name.clone(), agent.to_string()));
     }
 
     // 2단계: 소스에서 스킬 목록 재수집 (수집 후 업데이트된 목록)
@@ -260,15 +206,8 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions, result: &mu
     };
 
     // 3단계: 정방향 동기화 + 정리
-    for (agent, target_config) in &config.targets {
-        if !target_config.skills {
-            continue;
-        }
-        let agent_skill_dir = match skill_path(agent, opts.global) {
-            Some(p) => p,
-            None => continue,
-        };
-        if agent_skill_dir == config.skills_source {
+    for &(agent, agent_skill_dir) in &skill_targets {
+        if !config.targets.get(agent).map(|t| t.skills).unwrap_or(false) {
             continue;
         }
         let agent_dir = base_dir.join(agent_skill_dir);
@@ -319,7 +258,7 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions, result: &mu
                     continue;
                 }
             }
-            result.skills_linked.push((skill.clone(), agent.clone()));
+            result.skills_linked.push((skill.clone(), agent.to_string()));
         }
 
         // 정리: 깨진 심링크 제거
@@ -345,69 +284,41 @@ fn sync_instructions(
     opts: &SyncOptions,
     result: &mut SyncResult,
 ) {
-    if opts.global {
-        sync_instructions_global(config, base_dir, opts, result);
-    } else {
-        sync_instructions_project(config, base_dir, opts, result);
-    }
-}
-
-fn sync_instructions_project(
-    config: &Config,
-    base_dir: &Path,
-    opts: &SyncOptions,
-    result: &mut SyncResult,
-) {
     let source_path = base_dir.join(&config.instructions_source);
     if !source_path.exists() {
         return;
     }
 
-    for (agent, target_config) in &config.targets {
-        if !target_config.instructions {
+    for (agent, maybe_path) in agents::collect_instructions(opts.global) {
+        if !config
+            .targets
+            .get(agent)
+            .map(|t| t.instructions)
+            .unwrap_or(false)
+        {
             continue;
         }
-        match instruction_file_project(agent) {
-            Some(filename) => {
-                let link_path = base_dir.join(filename);
-                sync_instruction_link(&source_path, &link_path, filename, agent, opts, result);
-            }
-            None => {
-                result.instructions_skipped.push(agent.clone());
-            }
-        }
-    }
-}
-
-fn sync_instructions_global(
-    config: &Config,
-    base_dir: &Path,
-    opts: &SyncOptions,
-    result: &mut SyncResult,
-) {
-    let source_path = base_dir.join(&config.instructions_source);
-    if !source_path.exists() {
-        return;
-    }
-
-    for (agent, target_config) in &config.targets {
-        if !target_config.instructions {
-            continue;
-        }
-        match instruction_file_global(agent) {
+        match maybe_path {
             Some(rel_path) => {
                 let link_path = base_dir.join(rel_path);
 
                 // 소스와 동일 경로면 스킵
                 if link_path == source_path {
-                    result.instructions_skipped.push(agent.clone());
+                    result.instructions_skipped.push(agent.to_string());
                     continue;
                 }
 
-                sync_instruction_link(&source_path, &link_path, rel_path, agent, opts, result);
+                sync_instruction_link(
+                    &source_path,
+                    &link_path,
+                    rel_path,
+                    agent,
+                    opts,
+                    result,
+                );
             }
             None => {
-                result.instructions_skipped.push(agent.clone());
+                result.instructions_skipped.push(agent.to_string());
             }
         }
     }

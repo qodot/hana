@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::agents;
 use crate::config::Config;
 
 pub fn run(args: &[String]) -> Result<(), i32> {
@@ -23,28 +24,12 @@ pub fn run(args: &[String]) -> Result<(), i32> {
         1
     })?;
 
-    let result = execute(&config, &base_dir);
+    let result = execute(&config, &base_dir, is_global);
     print!("{}", format_result(&result));
     Ok(())
 }
 
-/// 에이전트별 스킬 경로 (sync.rs와 동일)
-fn skill_path(agent: &str) -> Option<&'static str> {
-    match agent {
-        "claude" => Some(".claude/skills"),
-        "codex" => Some(".agents/skills"),
-        "pi" => Some(".pi/skills"),
-        "opencode" => Some(".opencode/skills"),
-        _ => None,
-    }
-}
-
-fn instruction_file(agent: &str) -> Option<&'static str> {
-    match agent {
-        "claude" => Some("CLAUDE.md"),
-        _ => None,
-    }
-}
+// 경로 매핑은 agents 모듈에서 관리
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SkillState {
@@ -83,7 +68,7 @@ pub struct StatusResult {
     pub instructions: InstructionStatus,
 }
 
-pub fn execute(config: &Config, base_dir: &Path) -> StatusResult {
+pub fn execute(config: &Config, base_dir: &Path, global: bool) -> StatusResult {
     let source_dir = base_dir.join(&config.skills_source);
 
     // 소스 스킬 목록
@@ -100,22 +85,18 @@ pub fn execute(config: &Config, base_dir: &Path) -> StatusResult {
     };
     skill_names.sort();
 
-    let agents = ["claude", "codex", "pi", "opencode"];
+    let skill_targets = agents::collect_skills(global, &config.skills_source);
 
     // 스킬 상태
     let skills = skill_names
         .iter()
         .map(|name| {
-            let agent_states: Vec<(String, SkillState)> = agents
+            let agent_states: Vec<(String, SkillState)> = skill_targets
                 .iter()
-                .filter_map(|&agent| {
+                .filter_map(|&(agent, agent_dir)| {
                     let target_config = config.targets.get(agent)?;
                     if !target_config.skills {
                         return Some((agent.to_string(), SkillState::Missing));
-                    }
-                    let agent_dir = skill_path(agent)?;
-                    if agent_dir == config.skills_source {
-                        return None; // 소스와 동일, 표시 안함
                     }
                     let link_path = base_dir.join(agent_dir).join(name);
                     let state = check_skill_state(&link_path, &source_dir.join(name));
@@ -133,19 +114,28 @@ pub fn execute(config: &Config, base_dir: &Path) -> StatusResult {
     let source_path = base_dir.join(&config.instructions_source);
     let source_exists = source_path.exists();
 
-    let instruction_agents = agents
+    let instruction_agents = agents::collect_instructions(global)
         .iter()
-        .map(|&agent| {
-            let target_config = config.targets.get(agent);
-            let disabled = target_config.map(|t| !t.instructions).unwrap_or(true);
+        .map(|&(agent, maybe_path)| {
+            let disabled = config
+                .targets
+                .get(agent)
+                .map(|t| !t.instructions)
+                .unwrap_or(true);
 
             if disabled {
                 return (agent.to_string(), InstructionState::Disabled);
             }
 
-            match instruction_file(agent) {
-                Some(filename) => {
-                    let link_path = base_dir.join(filename);
+            match maybe_path {
+                Some(rel_path) => {
+                    let link_path = base_dir.join(rel_path);
+
+                    // 소스와 동일 경로면 직접 읽음
+                    if link_path == source_path {
+                        return (agent.to_string(), InstructionState::DirectRead);
+                    }
+
                     if link_path.is_symlink() {
                         if let Ok(target) = fs::read_link(&link_path) {
                             if target == source_path {
@@ -277,7 +267,7 @@ mod tests {
         let config = default_config();
         crate::sync::execute(&config, tmp.path(), &crate::sync::SyncOptions::default());
 
-        let result = execute(&config, tmp.path());
+        let result = execute(&config, tmp.path(), false);
 
         assert_eq!(result.skills.len(), 1);
         assert_eq!(result.skills[0].name, "my-skill");
@@ -293,7 +283,7 @@ mod tests {
 
         // sync 안 함 → 심링크 없음
         let config = default_config();
-        let result = execute(&config, tmp.path());
+        let result = execute(&config, tmp.path(), false);
 
         assert_eq!(result.skills.len(), 1);
         for (agent, state) in &result.skills[0].agents {
@@ -310,7 +300,7 @@ mod tests {
         fs::create_dir_all(tmp.path().join(".claude/skills/my-skill")).unwrap();
 
         let config = default_config();
-        let result = execute(&config, tmp.path());
+        let result = execute(&config, tmp.path(), false);
 
         let claude_state = result.skills[0]
             .agents
@@ -331,7 +321,7 @@ mod tests {
         symlink("/nonexistent", claude_dir.join("my-skill")).unwrap();
 
         let config = default_config();
-        let result = execute(&config, tmp.path());
+        let result = execute(&config, tmp.path(), false);
 
         let claude_state = result.skills[0]
             .agents
@@ -350,7 +340,7 @@ mod tests {
         let config = default_config();
         crate::sync::execute(&config, tmp.path(), &crate::sync::SyncOptions::default());
 
-        let result = execute(&config, tmp.path());
+        let result = execute(&config, tmp.path(), false);
 
         let claude = result.instructions.agents.iter().find(|(a, _)| a == "claude").unwrap();
         assert_eq!(claude.1, InstructionState::Synced);
@@ -365,7 +355,7 @@ mod tests {
         setup_source(tmp.path());
 
         let config = default_config();
-        let result = execute(&config, tmp.path());
+        let result = execute(&config, tmp.path(), false);
 
         let claude = result.instructions.agents.iter().find(|(a, _)| a == "claude").unwrap();
         assert_eq!(claude.1, InstructionState::Missing);
@@ -378,7 +368,7 @@ mod tests {
         fs::write(tmp.path().join("CLAUDE.md"), "real file").unwrap();
 
         let config = default_config();
-        let result = execute(&config, tmp.path());
+        let result = execute(&config, tmp.path(), false);
 
         let claude = result.instructions.agents.iter().find(|(a, _)| a == "claude").unwrap();
         assert_eq!(claude.1, InstructionState::RealFile);
@@ -392,7 +382,7 @@ mod tests {
         let mut config = default_config();
         config.targets.get_mut("claude").unwrap().instructions = false;
 
-        let result = execute(&config, tmp.path());
+        let result = execute(&config, tmp.path(), false);
 
         let claude = result.instructions.agents.iter().find(|(a, _)| a == "claude").unwrap();
         assert_eq!(claude.1, InstructionState::Disabled);
@@ -403,7 +393,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         let config = default_config();
-        let result = execute(&config, tmp.path());
+        let result = execute(&config, tmp.path(), false);
 
         assert!(result.skills.is_empty());
         assert!(!result.instructions.source_exists);

@@ -1,3 +1,4 @@
+mod agents;
 mod config;
 mod init;
 mod status;

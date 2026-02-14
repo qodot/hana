@@ -1,5 +1,8 @@
 # hana 🌸
 
+[![Crates.io](https://img.shields.io/crates/v/hanacli)](https://crates.io/crates/hanacli)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **하나** — 코딩 에이전트 설정을 하나로 통합하는 CLI 도구
 
 여러 AI 코딩 에이전트(Claude Code, Codex, Pi, OpenCode)의 스킬과 지침을 한 곳에서 관리하고 동기화한다.

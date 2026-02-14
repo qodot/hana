@@ -1,5 +1,8 @@
 # hana 🌸
 
+[![Crates.io](https://img.shields.io/crates/v/hanacli)](https://crates.io/crates/hanacli)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **hana** — A CLI tool that unifies coding agent configurations into a single source.
 
 Manage and sync skills and instructions across multiple AI coding agents (Claude Code, Codex, Pi, OpenCode) from one place.

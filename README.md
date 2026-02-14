@@ -1,44 +1,44 @@
 # hana 🌸
 
-**하나** — 코딩 에이전트 설정을 하나로 통합하는 CLI 도구
+**hana** — A CLI tool that unifies coding agent configurations into a single source.
 
-여러 AI 코딩 에이전트(Claude Code, Codex, Pi, OpenCode)의 스킬과 지침을 한 곳에서 관리하고 동기화합니다.
+Manage and sync skills and instructions across multiple AI coding agents (Claude Code, Codex, Pi, OpenCode) from one place.
 
-## 왜 hana?
+## Why?
 
-AI 코딩 에이전트마다 스킬과 지침의 저장 경로가 다릅니다:
+Each AI coding agent stores skills and instructions in different paths:
 
-| 에이전트 | 스킬 경로 | 지침 파일 |
-|---------|----------|----------|
+| Agent | Skills Path | Instructions File |
+|-------|-------------|-------------------|
 | Claude Code | `.claude/skills/` | `CLAUDE.md` |
 | Codex | `.agents/skills/` | `AGENTS.md` |
 | Pi | `.pi/skills/` | `PI.md` |
 | OpenCode | `.opencode/skills/` | `AGENTS.md` |
 
-하지만 모두 [Agent Skills](https://agentskills.io) 표준을 따릅니다. hana는 이 공통점을 활용해 **하나의 소스**에서 모든 에이전트로 동기화합니다.
+They all follow the [Agent Skills](https://agentskills.io) standard. hana uses this common ground to sync everything from a single source.
 
-## 동작 방식
+## How It Works
 
-1. `.agents/skills/`를 소스 오브 트루스(source of truth)로 사용
-2. 각 에이전트 경로에 **심볼릭 링크** 생성
-3. 다른 에이전트에서 생성된 새 스킬을 자동 감지하여 소스로 수집
+1. Uses `.agents/skills/` as the source of truth
+2. Creates **symlinks** to each agent's path
+3. Detects new skills created by other agents and collects them back to the source
 
 ```bash
-hana init      # 설정 파일 생성
-hana sync      # 스킬 & 지침 동기화
-hana status    # 현재 동기화 상태 확인
+hana init      # Create config file
+hana sync      # Sync skills & instructions
+hana status    # Check current sync state
 ```
 
-## 지원 범위
+## Scope
 
-- ✅ **스킬** — Agent Skills 표준 기반 심링크 동기화
-- ✅ **지침** — 마크다운 기반 지침 파일 동기화
-- 🚫 **명령어/훅** — 에이전트별 포맷이 달라 미지원
+- ✅ **Skills** — Symlink-based sync following the Agent Skills standard
+- ✅ **Instructions** — Markdown-based instruction file sync
+- 🚫 **Commands/Hooks** — Not supported due to incompatible formats across agents
 
-## 설치
+## Install
 
-> 🚧 개발 중
+> 🚧 Under development
 
-## 라이선스
+## License
 
 MIT

@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn test_parse_default_config() {
-        let config = Config::parse(crate::init::DEFAULT_CONFIG).unwrap();
+        let config = Config::parse(crate::init::PROJECT_CONFIG).unwrap();
         assert_eq!(config.skills_source, ".agents/skills");
         assert_eq!(config.instructions_source, "AGENTS.md");
         assert_eq!(config.targets.len(), 4);

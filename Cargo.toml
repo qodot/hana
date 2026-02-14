@@ -13,6 +13,7 @@ name = "hana"
 path = "src/main.rs"
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
 dirs = "6"
 toml = "0.8"
 

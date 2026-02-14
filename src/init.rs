@@ -35,16 +35,6 @@ pub struct InitOptions {
     pub dry_run: bool,
 }
 
-impl InitOptions {
-    pub fn from_args(args: &[String]) -> Self {
-        Self {
-            global: args.iter().any(|a| a == "--global"),
-            force: args.iter().any(|a| a == "--force"),
-            dry_run: args.iter().any(|a| a == "--dry-run"),
-        }
-    }
-}
-
 pub fn execute(opts: &InitOptions, base_dir: &Path) -> Result<InitOk, InitError> {
     if opts.dry_run {
         let path = if opts.global {
@@ -83,9 +73,7 @@ pub fn execute(opts: &InitOptions, base_dir: &Path) -> Result<InitOk, InitError>
     Ok(InitOk::Created { path: config_path })
 }
 
-pub fn run(args: &[String]) -> Result<(), i32> {
-    let opts = InitOptions::from_args(args);
-
+pub fn run(opts: &InitOptions) -> Result<(), i32> {
     let base_dir = if opts.global {
         dirs::home_dir().ok_or_else(|| {
             eprintln!("🌸 {}", InitError::NoHomeDir);

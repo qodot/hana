@@ -6,12 +6,8 @@ use crate::agents;
 use crate::config::Config;
 use crate::error::{SyncOk, SyncWarning};
 
-pub fn run(args: &[String]) -> Result<(), i32> {
-    let is_global = args.iter().any(|a| a == "--global");
-    let dry_run = args.iter().any(|a| a == "--dry-run");
-    let force = args.iter().any(|a| a == "--force");
-
-    let base_dir = if is_global {
+pub fn run(opts: &SyncOptions) -> Result<(), i32> {
+    let base_dir = if opts.global {
         dirs::home_dir().ok_or_else(|| {
             eprintln!("🌸 홈 디렉토리를 찾을 수 없습니다.");
             1
@@ -28,18 +24,13 @@ pub fn run(args: &[String]) -> Result<(), i32> {
         1
     })?;
 
-    if dry_run {
+    if opts.dry_run {
         println!("🌸 hana sync (dry-run)\n");
     } else {
         println!("🌸 hana sync\n");
     }
 
-    let opts = SyncOptions {
-        dry_run,
-        force,
-        global: is_global,
-    };
-    let result = execute(&config, &base_dir, &opts);
+    let result = execute(&config, &base_dir, opts);
 
     // 스킬 수집
     for (name, agent) in &result.skills_collected {

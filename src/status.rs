@@ -5,8 +5,7 @@ use crate::agents;
 use crate::config::Config;
 use crate::error::{InstructionState, InstructionStatusEntry, SkillState, SkillStatusEntry, StatusOk};
 
-pub fn run(args: &[String]) -> Result<(), i32> {
-    let is_global = args.iter().any(|a| a == "--global");
+pub fn run(is_global: bool) -> Result<(), i32> {
 
     let base_dir = if is_global {
         dirs::home_dir().ok_or_else(|| {

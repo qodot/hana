@@ -1,14 +1,15 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::config::{AgentName, Config, TargetFeature};
 
-/// 설정(`target.*.skills`)을 기준으로 스킬을 전파할 대상 디렉토리 목록을 만든다.
-/// 반환: (agent, destination_dir)
+/// 설정(`target.*.skills`)을 기준으로 스킬을 전파할 대상 디렉토리 맵을 만든다.
+/// 반환: agent -> destination_dir
 pub fn build_destinations(
     config: &Config,
     base_dir: &Path,
     global: bool,
-) -> Vec<(AgentName, PathBuf)> {
+) -> HashMap<AgentName, PathBuf> {
     let source_dir = config.resolve_source_skills_path(base_dir, global);
 
     config
@@ -38,7 +39,7 @@ mod tests {
 
         let destinations = build_destinations(&config, tmp.path(), false);
 
-        let agents: Vec<AgentName> = destinations.iter().map(|(a, _)| *a).collect();
+        let agents: Vec<AgentName> = destinations.keys().copied().collect();
         assert!(agents.contains(&AgentName::Claude));
         assert!(agents.contains(&AgentName::Opencode));
         assert!(!agents.contains(&AgentName::Pi));
@@ -52,16 +53,14 @@ mod tests {
 
         let destinations = build_destinations(&config, tmp.path(), true);
 
-        let pi = destinations
-            .iter()
-            .find(|(a, _)| *a == AgentName::Pi)
-            .unwrap();
-        assert_eq!(pi.1, tmp.path().join(".pi/agent/skills"));
-        let opencode = destinations
-            .iter()
-            .find(|(a, _)| *a == AgentName::Opencode)
-            .unwrap();
-        assert_eq!(opencode.1, tmp.path().join(".config/opencode/skills"));
+        assert_eq!(
+            destinations.get(&AgentName::Pi).unwrap(),
+            &tmp.path().join(".pi/agent/skills")
+        );
+        assert_eq!(
+            destinations.get(&AgentName::Opencode).unwrap(),
+            &tmp.path().join(".config/opencode/skills")
+        );
     }
 
     #[test]
@@ -72,7 +71,7 @@ mod tests {
 
         let destinations = build_destinations(&config, tmp.path(), false);
 
-        let agents: Vec<AgentName> = destinations.iter().map(|(a, _)| *a).collect();
+        let agents: Vec<AgentName> = destinations.keys().copied().collect();
         assert!(agents.contains(&AgentName::Claude));
         assert!(!agents.contains(&AgentName::Pi)); // source와 동일 경로이므로 제외
     }

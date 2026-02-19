@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use crate::error::SyncWarning;
+use crate::sync::SyncWarning;
 
 pub fn collect_sources(source_dir: &Path) -> Result<Vec<String>, SyncWarning> {
     if !source_dir.exists() {

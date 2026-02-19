@@ -1,10 +1,67 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::config::Config;
-use crate::error::{
-    InstructionState, InstructionStatusEntry, SkillState, SkillStatusEntry, StatusError, StatusOk,
-};
+use crate::config::{Config, ConfigError};
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SkillState {
+    Synced,
+    RealDir,
+    BrokenSymlink,
+    Missing,
+    WrongTarget,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum InstructionState {
+    Synced,
+    DirectRead,
+    RealFile,
+    Missing,
+    Disabled,
+}
+
+#[derive(Debug)]
+pub struct StatusOk {
+    pub skills: Vec<SkillStatusEntry>,
+    pub instructions: InstructionStatusEntry,
+}
+
+#[derive(Debug)]
+pub struct SkillStatusEntry {
+    pub name: String,
+    pub agents: Vec<(String, SkillState)>,
+}
+
+#[derive(Debug)]
+pub struct InstructionStatusEntry {
+    pub source: String,
+    pub source_exists: bool,
+    pub agents: Vec<(String, InstructionState)>,
+}
+
+#[derive(Debug)]
+pub enum StatusError {
+    /// 설정 파일 로딩 실패
+    Config(ConfigError),
+    /// 홈 디렉토리를 찾을 수 없음
+    NoHomeDir,
+}
+
+impl std::fmt::Display for StatusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Config(e) => write!(f, "{e}"),
+            Self::NoHomeDir => write!(f, "홈 디렉토리를 찾을 수 없습니다."),
+        }
+    }
+}
+
+impl From<ConfigError> for StatusError {
+    fn from(e: ConfigError) -> Self {
+        Self::Config(e)
+    }
+}
 
 pub fn run(is_global: bool) -> Result<StatusOk, StatusError> {
     let base_dir = if is_global {
@@ -72,9 +129,6 @@ pub fn format_result(result: &StatusOk) -> String {
 
     out
 }
-
-// 경로 매핑은 config(hana.toml)에서 관리
-// 타입은 error 모듈에서 관리
 
 pub fn execute(config: &Config, base_dir: &Path, global: bool) -> StatusOk {
     let source_dir = config.resolve_source_skills_path(base_dir, global);

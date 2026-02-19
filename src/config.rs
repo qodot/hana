@@ -3,7 +3,31 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::error::ConfigError;
+#[derive(Debug)]
+pub enum ConfigError {
+    /// 설정 파일을 읽을 수 없음
+    ReadFile {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    /// TOML 파싱 실패
+    Parse { message: String },
+}
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ReadFile { path, source } => {
+                write!(
+                    f,
+                    "설정 파일을 읽을 수 없습니다 ({}): {source}",
+                    path.display()
+                )
+            }
+            Self::Parse { message } => write!(f, "TOML 파싱 실패: {message}"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AgentName {

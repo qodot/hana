@@ -1,22 +1,25 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::config::AgentName;
+
 #[derive(Debug, Default)]
 pub struct BroadcastOk {
-    pub linked: Vec<PathBuf>,
+    pub linked: Vec<AgentName>,
 }
 
 #[derive(Debug, Default)]
 pub struct BroadcastErr {
-    pub linked: Vec<PathBuf>,
-    pub conflicts: Vec<PathBuf>,
-    pub failed: Vec<(PathBuf, String)>,
+    pub linked: Vec<AgentName>,
+    pub conflicts: Vec<AgentName>,
+    pub failed: Vec<(AgentName, String)>,
 }
 
-/// source 하나를 여러 dest에 심링크로 전파한다.
+/// source 하나를 여러 대상 디렉토리에 동일 이름으로 심링크 전파한다.
 pub fn broadcast_symlink(
     source: &Path,
-    dests: &[PathBuf],
+    dest_dirs: &HashMap<AgentName, PathBuf>,
     dry_run: bool,
     force: bool,
 ) -> Result<BroadcastOk, BroadcastErr> {
@@ -24,14 +27,34 @@ pub fn broadcast_symlink(
     let mut conflicts = Vec::new();
     let mut failed = Vec::new();
 
-    for dest in dests {
-        match link_one(source, dest, dry_run, force) {
-            LinkOutcome::Created => linked.push(dest.clone()),
+    let Some(source_name) = source.file_name() else {
+        failed.extend(
+            dest_dirs
+                .keys()
+                .copied()
+                .map(|agent| (agent, "소스 이름을 확인할 수 없습니다.".to_string())),
+        );
+        failed.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+        return Err(BroadcastErr {
+            linked,
+            conflicts,
+            failed,
+        });
+    };
+
+    for (agent, dest_dir) in dest_dirs {
+        let dest = dest_dir.join(source_name);
+        match link_one(source, &dest, dry_run, force) {
+            LinkOutcome::Created => linked.push(*agent),
             LinkOutcome::AlreadyValid => {}
-            LinkOutcome::Conflict => conflicts.push(dest.clone()),
-            LinkOutcome::Failed(detail) => failed.push((dest.clone(), detail)),
+            LinkOutcome::Conflict => conflicts.push(*agent),
+            LinkOutcome::Failed(detail) => failed.push((*agent, detail)),
         }
     }
+
+    linked.sort_by_key(|a| a.as_str());
+    conflicts.sort_by_key(|a| a.as_str());
+    failed.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
 
     if conflicts.is_empty() && failed.is_empty() {
         Ok(BroadcastOk { linked })
@@ -103,19 +126,23 @@ mod tests {
         let source = tmp.path().join("source/skill-a");
         fs::create_dir_all(&source).unwrap();
 
-        let dests = vec![
-            tmp.path().join("agent1/skill-a"),
-            tmp.path().join("agent2/skill-a"),
-        ];
-        for d in &dests {
-            fs::create_dir_all(d.parent().unwrap()).unwrap();
+        let claude_dir = tmp.path().join("agent1");
+        let pi_dir = tmp.path().join("agent2");
+        let dests = HashMap::from([
+            (AgentName::Claude, claude_dir.clone()),
+            (AgentName::Pi, pi_dir.clone()),
+        ]);
+        for d in dests.values() {
+            fs::create_dir_all(d).unwrap();
         }
 
         let result = broadcast_symlink(&source, &dests, false, false).unwrap();
 
         assert_eq!(result.linked.len(), 2);
-        assert_eq!(fs::read_link(&dests[0]).unwrap(), source);
-        assert_eq!(fs::read_link(&dests[1]).unwrap(), source);
+        assert!(result.linked.contains(&AgentName::Claude));
+        assert!(result.linked.contains(&AgentName::Pi));
+        assert_eq!(fs::read_link(claude_dir.join("skill-a")).unwrap(), source);
+        assert_eq!(fs::read_link(pi_dir.join("skill-a")).unwrap(), source);
     }
 
     #[test]
@@ -124,11 +151,12 @@ mod tests {
         let source = tmp.path().join("source/skill-a");
         fs::create_dir_all(&source).unwrap();
 
-        let dest = tmp.path().join("agent1/skill-a");
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        std::os::unix::fs::symlink(&source, &dest).unwrap();
+        let dest_dir = tmp.path().join("agent1");
+        fs::create_dir_all(&dest_dir).unwrap();
+        std::os::unix::fs::symlink(&source, dest_dir.join("skill-a")).unwrap();
 
-        let result = broadcast_symlink(&source, &[dest], false, false).unwrap();
+        let dests = HashMap::from([(AgentName::Claude, dest_dir)]);
+        let result = broadcast_symlink(&source, &dests, false, false).unwrap();
 
         assert!(result.linked.is_empty());
     }
@@ -139,14 +167,15 @@ mod tests {
         let source = tmp.path().join("source/skill-a");
         fs::create_dir_all(&source).unwrap();
 
-        let dest = tmp.path().join("agent1/skill-a");
-        fs::create_dir_all(&dest).unwrap();
+        let dest_dir = tmp.path().join("agent1");
+        fs::create_dir_all(dest_dir.join("skill-a")).unwrap();
 
-        let err = broadcast_symlink(&source, &[dest.clone()], false, false).unwrap_err();
+        let dests = HashMap::from([(AgentName::Claude, dest_dir.clone())]);
+        let err = broadcast_symlink(&source, &dests, false, false).unwrap_err();
 
         assert!(err.linked.is_empty());
-        assert_eq!(err.conflicts, vec![dest.clone()]);
-        assert!(dest.is_dir());
+        assert_eq!(err.conflicts, vec![AgentName::Claude]);
+        assert!(dest_dir.join("skill-a").is_dir());
     }
 
     #[test]
@@ -155,14 +184,15 @@ mod tests {
         let source = tmp.path().join("source/skill-a");
         fs::create_dir_all(&source).unwrap();
 
-        let dest = tmp.path().join("agent1/skill-a");
-        fs::create_dir_all(&dest).unwrap();
+        let dest_dir = tmp.path().join("agent1");
+        fs::create_dir_all(dest_dir.join("skill-a")).unwrap();
 
-        let result = broadcast_symlink(&source, &[dest.clone()], false, true).unwrap();
+        let dests = HashMap::from([(AgentName::Claude, dest_dir.clone())]);
+        let result = broadcast_symlink(&source, &dests, false, true).unwrap();
 
-        assert_eq!(result.linked, vec![dest.clone()]);
-        assert!(dest.is_symlink());
-        assert_eq!(fs::read_link(&dest).unwrap(), source);
+        assert_eq!(result.linked, vec![AgentName::Claude]);
+        assert!(dest_dir.join("skill-a").is_symlink());
+        assert_eq!(fs::read_link(dest_dir.join("skill-a")).unwrap(), source);
     }
 
     #[test]
@@ -171,14 +201,15 @@ mod tests {
         let source = tmp.path().join("source/skill-a");
         fs::create_dir_all(&source).unwrap();
 
-        let dest = tmp.path().join("agent1/skill-a");
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        fs::write(&dest, "existing").unwrap();
+        let dest_dir = tmp.path().join("agent1");
+        fs::create_dir_all(&dest_dir).unwrap();
+        fs::write(dest_dir.join("skill-a"), "existing").unwrap();
 
-        let result = broadcast_symlink(&source, &[dest.clone()], false, true).unwrap();
+        let dests = HashMap::from([(AgentName::Claude, dest_dir.clone())]);
+        let result = broadcast_symlink(&source, &dests, false, true).unwrap();
 
-        assert_eq!(result.linked, vec![dest.clone()]);
-        assert!(dest.is_symlink());
+        assert_eq!(result.linked, vec![AgentName::Claude]);
+        assert!(dest_dir.join("skill-a").is_symlink());
     }
 
     #[test]
@@ -187,13 +218,14 @@ mod tests {
         let source = tmp.path().join("source/skill-a");
         fs::create_dir_all(&source).unwrap();
 
-        let dest = tmp.path().join("agent1/skill-a");
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        let dest_dir = tmp.path().join("agent1");
+        fs::create_dir_all(&dest_dir).unwrap();
 
-        let result = broadcast_symlink(&source, &[dest.clone()], true, false).unwrap();
+        let dests = HashMap::from([(AgentName::Claude, dest_dir.clone())]);
+        let result = broadcast_symlink(&source, &dests, true, false).unwrap();
 
-        assert_eq!(result.linked, vec![dest.clone()]);
-        assert!(!dest.exists());
+        assert_eq!(result.linked, vec![AgentName::Claude]);
+        assert!(!dest_dir.join("skill-a").exists());
     }
 
     #[test]
@@ -204,14 +236,15 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         fs::create_dir_all(&wrong).unwrap();
 
-        let dest = tmp.path().join("agent1/skill-a");
-        fs::create_dir_all(dest.parent().unwrap()).unwrap();
-        std::os::unix::fs::symlink(&wrong, &dest).unwrap();
+        let dest_dir = tmp.path().join("agent1");
+        fs::create_dir_all(&dest_dir).unwrap();
+        std::os::unix::fs::symlink(&wrong, dest_dir.join("skill-a")).unwrap();
 
-        let result = broadcast_symlink(&source, &[dest.clone()], false, false).unwrap();
+        let dests = HashMap::from([(AgentName::Claude, dest_dir.clone())]);
+        let result = broadcast_symlink(&source, &dests, false, false).unwrap();
 
-        assert_eq!(result.linked, vec![dest.clone()]);
-        assert_eq!(fs::read_link(&dest).unwrap(), source);
+        assert_eq!(result.linked, vec![AgentName::Claude]);
+        assert_eq!(fs::read_link(dest_dir.join("skill-a")).unwrap(), source);
     }
 
     #[test]
@@ -220,12 +253,13 @@ mod tests {
         let source = tmp.path().join("source/skill-a");
         fs::create_dir_all(&source).unwrap();
 
-        let dest = tmp.path().join("deep/nested/agent/skill-a");
+        let dest_dir = tmp.path().join("deep/nested/agent");
 
-        let result = broadcast_symlink(&source, &[dest.clone()], false, false).unwrap();
+        let dests = HashMap::from([(AgentName::Claude, dest_dir.clone())]);
+        let result = broadcast_symlink(&source, &dests, false, false).unwrap();
 
-        assert_eq!(result.linked, vec![dest.clone()]);
-        assert!(dest.is_symlink());
+        assert_eq!(result.linked, vec![AgentName::Claude]);
+        assert!(dest_dir.join("skill-a").is_symlink());
     }
 
     #[test]
@@ -234,16 +268,21 @@ mod tests {
         let source = tmp.path().join("source/skill-a");
         fs::create_dir_all(&source).unwrap();
 
-        let good = tmp.path().join("agent1/skill-a");
-        fs::create_dir_all(good.parent().unwrap()).unwrap();
+        let good_dir = tmp.path().join("agent1");
+        fs::create_dir_all(&good_dir).unwrap();
 
-        let conflict = tmp.path().join("agent2/skill-a");
-        fs::create_dir_all(&conflict).unwrap();
+        let conflict_dir = tmp.path().join("agent2");
+        fs::create_dir_all(conflict_dir.join("skill-a")).unwrap();
 
-        let err = broadcast_symlink(&source, &[good.clone(), conflict.clone()], false, false)
-            .unwrap_err();
+        let dests = HashMap::from([
+            (AgentName::Claude, good_dir.clone()),
+            (AgentName::Pi, conflict_dir.clone()),
+        ]);
 
-        assert_eq!(err.linked, vec![good]);
-        assert_eq!(err.conflicts, vec![conflict]);
+        let err = broadcast_symlink(&source, &dests, false, false).unwrap_err();
+
+        assert_eq!(err.linked, vec![AgentName::Claude]);
+        assert_eq!(err.conflicts, vec![AgentName::Pi]);
+        assert!(good_dir.join("skill-a").is_symlink());
     }
 }

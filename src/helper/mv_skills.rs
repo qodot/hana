@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::AgentName;
-use crate::error::SyncWarning;
+use crate::sync::SyncWarning;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillLinkTask {

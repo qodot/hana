@@ -1,7 +1,52 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::error::{InitError, InitOk};
+#[derive(Debug)]
+pub enum InitOk {
+    /// 설정 파일 생성 완료
+    Created { path: PathBuf },
+    /// dry-run: 내용만 출력
+    DryRun { path: String, content: String },
+}
+
+#[derive(Debug)]
+pub enum InitError {
+    /// 설정 파일이 이미 존재 (--force 없이)
+    AlreadyExists { path: PathBuf },
+    /// 디렉토리 생성 실패
+    CreateDir {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    /// 파일 쓰기 실패
+    WriteFile {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    /// 홈 디렉토리를 찾을 수 없음
+    NoHomeDir,
+}
+
+impl std::fmt::Display for InitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AlreadyExists { path } => {
+                write!(
+                    f,
+                    "이미 존재합니다: {}\n   덮어쓰려면 --force 옵션을 사용하세요.",
+                    path.display()
+                )
+            }
+            Self::CreateDir { path, source } => {
+                write!(f, "디렉토리 생성 실패 ({}): {source}", path.display())
+            }
+            Self::WriteFile { path, source } => {
+                write!(f, "파일 생성 실패 ({}): {source}", path.display())
+            }
+            Self::NoHomeDir => write!(f, "홈 디렉토리를 찾을 수 없습니다."),
+        }
+    }
+}
 
 pub const PROJECT_CONFIG: &str = r#"# hana - AI 코딩 에이전트 동기화 설정
 # https://github.com/qodot/hana

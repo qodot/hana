@@ -1,6 +1,5 @@
 mod agents;
 mod config;
-mod error;
 mod helper;
 mod init;
 mod status;
@@ -10,7 +9,8 @@ use std::collections::HashMap;
 
 use clap::{Parser, Subcommand};
 
-use error::{InitOk, SyncOk};
+use init::InitOk;
+use sync::SyncOk;
 
 #[derive(Parser)]
 #[command(name = "hana", version, about = "🌸 AI 코딩 에이전트 스킬/지침 동기화")]
@@ -114,7 +114,7 @@ fn run_sync(opts: sync::SyncOptions) -> i32 {
         Ok(r) => r,
         Err(e) => {
             eprintln!("🌸 {e}");
-            if matches!(e, error::SyncError::Config(_)) {
+            if matches!(e, sync::SyncError::Config(_)) {
                 eprintln!("   hana init 으로 설정 파일을 먼저 생성하세요.");
             }
             return 1;
@@ -187,7 +187,7 @@ fn run_status(global: bool) -> i32 {
         Ok(r) => r,
         Err(e) => {
             eprintln!("🌸 {e}");
-            if matches!(e, error::StatusError::Config(_)) {
+            if matches!(e, status::StatusError::Config(_)) {
                 eprintln!("   hana init 으로 설정 파일을 먼저 생성하세요.");
             }
             return 1;

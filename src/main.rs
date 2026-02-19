@@ -6,9 +6,11 @@ mod status;
 mod sync;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+use config::Config;
 use init::InitOk;
 use sync::SyncOk;
 
@@ -91,8 +93,24 @@ fn main() {
     }
 }
 
+fn resolve_base_dir(global: bool) -> Result<PathBuf, String> {
+    if global {
+        dirs::home_dir().ok_or_else(|| "홈 디렉토리를 찾을 수 없습니다.".to_string())
+    } else {
+        Ok(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+    }
+}
+
 fn run_init(opts: init::InitOptions) -> i32 {
-    match init::run(&opts) {
+    let base_dir = match resolve_base_dir(opts.global) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("🌸 {e}");
+            return 1;
+        }
+    };
+
+    match init::run(&opts, &base_dir) {
         Ok(InitOk::Created { path }) => {
             println!("🌸 생성 완료: {}", path.display());
             0
@@ -110,16 +128,25 @@ fn run_init(opts: init::InitOptions) -> i32 {
 }
 
 fn run_sync(opts: sync::SyncOptions) -> i32 {
-    let result = match sync::run(&opts) {
-        Ok(r) => r,
+    let base_dir = match resolve_base_dir(opts.global) {
+        Ok(d) => d,
         Err(e) => {
             eprintln!("🌸 {e}");
-            if matches!(e, sync::SyncError::Config(_)) {
-                eprintln!("   hana init 으로 설정 파일을 먼저 생성하세요.");
-            }
             return 1;
         }
     };
+
+    let config_path = base_dir.join(".agents/hana.toml");
+    let config = match Config::load(&config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("🌸 {e}");
+            eprintln!("   hana init 으로 설정 파일을 먼저 생성하세요.");
+            return 1;
+        }
+    };
+
+    let result = sync::run(&config, &base_dir, &opts);
 
     if opts.dry_run {
         println!("🌸 hana sync (dry-run)\n");
@@ -145,6 +172,10 @@ fn print_sync_result(result: &SyncOk, _opts: &sync::SyncOptions) {
         for (skill, agents) in &by_skill {
             println!("  ✅ {skill} → {}", agents.join(", "));
         }
+    }
+
+    if let Some((file, agent)) = &result.instructions_collected {
+        println!("  🆕 {file} ({agent}에서 수집) → AGENTS.md");
     }
 
     if !result.instructions_linked.is_empty() || !result.instructions_skipped.is_empty() {
@@ -173,6 +204,7 @@ fn print_sync_result(result: &SyncOk, _opts: &sync::SyncOptions) {
 
     if result.skills_linked.is_empty()
         && result.skills_collected.is_empty()
+        && result.instructions_collected.is_none()
         && result.instructions_linked.is_empty()
         && result.cleaned.is_empty()
     {
@@ -183,17 +215,25 @@ fn print_sync_result(result: &SyncOk, _opts: &sync::SyncOptions) {
 }
 
 fn run_status(global: bool) -> i32 {
-    let result = match status::run(global) {
-        Ok(r) => r,
+    let base_dir = match resolve_base_dir(global) {
+        Ok(d) => d,
         Err(e) => {
             eprintln!("🌸 {e}");
-            if matches!(e, status::StatusError::Config(_)) {
-                eprintln!("   hana init 으로 설정 파일을 먼저 생성하세요.");
-            }
             return 1;
         }
     };
 
+    let config_path = base_dir.join(".agents/hana.toml");
+    let config = match Config::load(&config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("🌸 {e}");
+            eprintln!("   hana init 으로 설정 파일을 먼저 생성하세요.");
+            return 1;
+        }
+    };
+
+    let result = status::run(&config, &base_dir, global);
     print!("{}", status::format_result(&result));
     0
 }

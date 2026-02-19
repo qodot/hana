@@ -1,25 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::config::{Config, ConfigError};
+use crate::config::Config;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum SkillState {
-    Synced,
-    RealDir,
-    BrokenSymlink,
-    Missing,
-    WrongTarget,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum InstructionState {
-    Synced,
-    DirectRead,
-    RealFile,
-    Missing,
-    Disabled,
-}
+// --- Ok ---
 
 #[derive(Debug)]
 pub struct StatusOk {
@@ -40,97 +24,27 @@ pub struct InstructionStatusEntry {
     pub agents: Vec<(String, InstructionState)>,
 }
 
-#[derive(Debug)]
-pub enum StatusError {
-    /// 설정 파일 로딩 실패
-    Config(ConfigError),
-    /// 홈 디렉토리를 찾을 수 없음
-    NoHomeDir,
+#[derive(Debug, Clone, PartialEq)]
+pub enum SkillState {
+    Synced,
+    RealDir,
+    BrokenSymlink,
+    Missing,
+    WrongTarget,
 }
 
-impl std::fmt::Display for StatusError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Config(e) => write!(f, "{e}"),
-            Self::NoHomeDir => write!(f, "홈 디렉토리를 찾을 수 없습니다."),
-        }
-    }
+#[derive(Debug, Clone, PartialEq)]
+pub enum InstructionState {
+    Synced,
+    DirectRead,
+    RealFile,
+    Missing,
+    Disabled,
 }
 
-impl From<ConfigError> for StatusError {
-    fn from(e: ConfigError) -> Self {
-        Self::Config(e)
-    }
-}
+// --- pub fn run ---
 
-pub fn run(is_global: bool) -> Result<StatusOk, StatusError> {
-    let base_dir = if is_global {
-        dirs::home_dir().ok_or(StatusError::NoHomeDir)?
-    } else {
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-    };
-
-    let config_path = base_dir.join(".agents/hana.toml");
-    let config = Config::load(&config_path)?;
-
-    Ok(execute(&config, &base_dir, is_global))
-}
-
-pub fn format_result(result: &StatusOk) -> String {
-    let mut out = String::from("🌸 hana status\n");
-
-    // 스킬
-    if result.skills.is_empty() {
-        out.push_str("\n스킬: (없음)\n");
-    } else {
-        out.push_str("\n스킬:\n");
-        for skill in &result.skills {
-            let states: Vec<String> = skill
-                .agents
-                .iter()
-                .map(|(agent, state)| match state {
-                    SkillState::Synced => format!("✅ {agent}"),
-                    SkillState::RealDir => format!("⚠️ {agent}(실제)"),
-                    SkillState::BrokenSymlink => format!("💔 {agent}(깨짐)"),
-                    SkillState::Missing => format!("❌ {agent}"),
-                    SkillState::WrongTarget => format!("⚠️ {agent}(다른 타겟)"),
-                })
-                .collect();
-            out.push_str(&format!("  {}  {}\n", skill.name, states.join(" ")));
-        }
-    }
-
-    // 지침
-    out.push_str("\n지침:\n");
-    if result.instructions.source_exists {
-        out.push_str(&format!("  {}  ✅ 소스\n", result.instructions.source));
-    } else {
-        out.push_str(&format!("  {}  ❌ 소스 없음\n", result.instructions.source));
-    }
-    for (agent, state) in &result.instructions.agents {
-        match state {
-            InstructionState::Synced => {
-                out.push_str(&format!("  {agent}  ✅ 심링크\n"));
-            }
-            InstructionState::DirectRead => {
-                out.push_str(&format!("  {agent}  ℹ️  직접 읽음\n"));
-            }
-            InstructionState::RealFile => {
-                out.push_str(&format!("  {agent}  ⚠️ 실제 파일 (충돌)\n"));
-            }
-            InstructionState::Missing => {
-                out.push_str(&format!("  {agent}  ❌ 없음\n"));
-            }
-            InstructionState::Disabled => {
-                out.push_str(&format!("  {agent}  ⏭️  비활성화\n"));
-            }
-        }
-    }
-
-    out
-}
-
-pub fn execute(config: &Config, base_dir: &Path, global: bool) -> StatusOk {
+pub fn run(config: &Config, base_dir: &Path, global: bool) -> StatusOk {
     let source_dir = config.resolve_source_skills_path(base_dir, global);
 
     // 소스 스킬 목록
@@ -237,6 +151,62 @@ pub fn execute(config: &Config, base_dir: &Path, global: bool) -> StatusOk {
     }
 }
 
+// --- Internal ---
+
+pub fn format_result(result: &StatusOk) -> String {
+    let mut out = String::from("🌸 hana status\n");
+
+    // 스킬
+    if result.skills.is_empty() {
+        out.push_str("\n스킬: (없음)\n");
+    } else {
+        out.push_str("\n스킬:\n");
+        for skill in &result.skills {
+            let states: Vec<String> = skill
+                .agents
+                .iter()
+                .map(|(agent, state)| match state {
+                    SkillState::Synced => format!("✅ {agent}"),
+                    SkillState::RealDir => format!("⚠️ {agent}(실제)"),
+                    SkillState::BrokenSymlink => format!("💔 {agent}(깨짐)"),
+                    SkillState::Missing => format!("❌ {agent}"),
+                    SkillState::WrongTarget => format!("⚠️ {agent}(다른 타겟)"),
+                })
+                .collect();
+            out.push_str(&format!("  {}  {}\n", skill.name, states.join(" ")));
+        }
+    }
+
+    // 지침
+    out.push_str("\n지침:\n");
+    if result.instructions.source_exists {
+        out.push_str(&format!("  {}  ✅ 소스\n", result.instructions.source));
+    } else {
+        out.push_str(&format!("  {}  ❌ 소스 없음\n", result.instructions.source));
+    }
+    for (agent, state) in &result.instructions.agents {
+        match state {
+            InstructionState::Synced => {
+                out.push_str(&format!("  {agent}  ✅ 심링크\n"));
+            }
+            InstructionState::DirectRead => {
+                out.push_str(&format!("  {agent}  ℹ️  직접 읽음\n"));
+            }
+            InstructionState::RealFile => {
+                out.push_str(&format!("  {agent}  ⚠️ 실제 파일 (충돌)\n"));
+            }
+            InstructionState::Missing => {
+                out.push_str(&format!("  {agent}  ❌ 없음\n"));
+            }
+            InstructionState::Disabled => {
+                out.push_str(&format!("  {agent}  ⏭️  비활성화\n"));
+            }
+        }
+    }
+
+    out
+}
+
 fn check_skill_state(link_path: &Path, expected_target: &Path) -> SkillState {
     if link_path.is_symlink() {
         if !link_path.exists() {
@@ -281,9 +251,9 @@ mod tests {
 
         // sync 실행
         let config = default_config();
-        crate::sync::execute(&config, tmp.path(), &crate::sync::SyncOptions::default());
+        crate::sync::run(&config, tmp.path(), &crate::sync::SyncOptions::default());
 
-        let result = execute(&config, tmp.path(), false);
+        let result = run(&config, tmp.path(), false);
 
         assert_eq!(result.skills.len(), 1);
         assert_eq!(result.skills[0].name, "my-skill");
@@ -299,7 +269,7 @@ mod tests {
 
         // sync 안 함 → 심링크 없음
         let config = default_config();
-        let result = execute(&config, tmp.path(), false);
+        let result = run(&config, tmp.path(), false);
 
         assert_eq!(result.skills.len(), 1);
         for (agent, state) in &result.skills[0].agents {
@@ -316,7 +286,7 @@ mod tests {
         fs::create_dir_all(tmp.path().join(".claude/skills/my-skill")).unwrap();
 
         let config = default_config();
-        let result = execute(&config, tmp.path(), false);
+        let result = run(&config, tmp.path(), false);
 
         let claude_state = result.skills[0]
             .agents
@@ -337,7 +307,7 @@ mod tests {
         symlink("/nonexistent", claude_dir.join("my-skill")).unwrap();
 
         let config = default_config();
-        let result = execute(&config, tmp.path(), false);
+        let result = run(&config, tmp.path(), false);
 
         let claude_state = result.skills[0]
             .agents
@@ -354,9 +324,9 @@ mod tests {
         setup_source(tmp.path());
 
         let config = default_config();
-        crate::sync::execute(&config, tmp.path(), &crate::sync::SyncOptions::default());
+        crate::sync::run(&config, tmp.path(), &crate::sync::SyncOptions::default());
 
-        let result = execute(&config, tmp.path(), false);
+        let result = run(&config, tmp.path(), false);
 
         let claude = result
             .instructions
@@ -381,7 +351,7 @@ mod tests {
         setup_source(tmp.path());
 
         let config = default_config();
-        let result = execute(&config, tmp.path(), false);
+        let result = run(&config, tmp.path(), false);
 
         let claude = result
             .instructions
@@ -399,7 +369,7 @@ mod tests {
         fs::write(tmp.path().join("CLAUDE.md"), "real file").unwrap();
 
         let config = default_config();
-        let result = execute(&config, tmp.path(), false);
+        let result = run(&config, tmp.path(), false);
 
         let claude = result
             .instructions
@@ -418,7 +388,7 @@ mod tests {
         let mut config = default_config();
         config.targets.get_mut("claude").unwrap().instructions = false;
 
-        let result = execute(&config, tmp.path(), false);
+        let result = run(&config, tmp.path(), false);
 
         let claude = result
             .instructions
@@ -434,7 +404,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         let config = default_config();
-        let result = execute(&config, tmp.path(), false);
+        let result = run(&config, tmp.path(), false);
 
         assert!(result.skills.is_empty());
         assert!(!result.instructions.source_exists);

@@ -3,12 +3,35 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::{AgentName, Config, TargetFeature};
-use crate::config::ConfigError;
-use crate::helper::broadcast_target_symlink::broadcast_target_symlink;
+use crate::helper::broadcast_target_symlink::{broadcast_target_symlink, link_one, LinkOutcome};
 use crate::helper::collect_source_skills::collect_source_skills;
 use crate::helper::collect_target_skills::collect_target_skills;
 use crate::helper::move_target_skills::move_target_skills;
 use crate::helper::resolve_target_destinations::resolve_target_destinations;
+
+// --- Options ---
+
+#[derive(Debug, Default)]
+pub struct SyncOptions {
+    pub dry_run: bool,
+    pub force: bool,
+    pub global: bool,
+}
+
+// --- Ok ---
+
+#[derive(Debug)]
+pub struct SyncOk {
+    pub skills_linked: Vec<(String, String)>,
+    pub skills_collected: Vec<(String, String)>,
+    pub instructions_collected: Option<(String, String)>,
+    pub instructions_linked: Vec<String>,
+    pub instructions_skipped: Vec<String>,
+    pub cleaned: Vec<PathBuf>,
+    pub warnings: Vec<SyncWarning>,
+}
+
+// --- Warning ---
 
 #[derive(Debug)]
 pub enum SyncWarning {
@@ -22,14 +45,6 @@ pub enum SyncWarning {
     InstructionConflict { file: String },
     /// 파일시스템 작업 실패
     IoFailed { operation: String, detail: String },
-}
-
-#[derive(Debug)]
-pub enum SyncError {
-    /// 설정 파일 로딩 실패
-    Config(ConfigError),
-    /// 홈 디렉토리를 찾을 수 없음
-    NoHomeDir,
 }
 
 impl std::fmt::Display for SyncWarning {
@@ -63,58 +78,16 @@ impl std::fmt::Display for SyncWarning {
     }
 }
 
-impl std::fmt::Display for SyncError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Config(e) => write!(f, "{e}"),
-            Self::NoHomeDir => write!(f, "홈 디렉토리를 찾을 수 없습니다."),
-        }
-    }
-}
+// --- pub fn run ---
 
-impl From<ConfigError> for SyncError {
-    fn from(e: ConfigError) -> Self {
-        Self::Config(e)
-    }
-}
-
-#[derive(Debug)]
-pub struct SyncOk {
-    pub skills_linked: Vec<(String, String)>,
-    pub skills_collected: Vec<(String, String)>,
-    pub instructions_linked: Vec<String>,
-    pub instructions_skipped: Vec<String>,
-    pub cleaned: Vec<PathBuf>,
-    pub warnings: Vec<SyncWarning>,
-}
-
-pub fn run(opts: &SyncOptions) -> Result<SyncOk, SyncError> {
-    let base_dir = if opts.global {
-        dirs::home_dir().ok_or(SyncError::NoHomeDir)?
-    } else {
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-    };
-
-    let config_path = base_dir.join(".agents/hana.toml");
-    let config = Config::load(&config_path)?;
-
-    Ok(execute(&config, &base_dir, opts))
-}
-
-#[derive(Debug, Default)]
-pub struct SyncOptions {
-    pub dry_run: bool,
-    pub force: bool,
-    pub global: bool,
-}
-
-pub fn execute(config: &Config, base_dir: &Path, opts: &SyncOptions) -> SyncOk {
+pub fn run(config: &Config, base_dir: &Path, opts: &SyncOptions) -> SyncOk {
     let skills = sync_skills(config, base_dir, opts);
     let instructions = sync_instructions(config, base_dir, opts);
 
     SyncOk {
         skills_linked: skills.linked,
         skills_collected: skills.collected,
+        instructions_collected: instructions.collected,
         instructions_linked: instructions.linked,
         instructions_skipped: instructions.skipped,
         cleaned: skills.cleaned,
@@ -138,15 +111,10 @@ struct SkillsSyncResult {
 
 #[derive(Default)]
 struct InstructionsSyncResult {
+    collected: Option<(String, String)>,
     linked: Vec<String>,
     skipped: Vec<String>,
     warnings: Vec<SyncWarning>,
-}
-
-enum InstructionLinkOutcome {
-    AlreadyValid,
-    Linked,
-    Warning(SyncWarning),
 }
 
 // --- Skills sync ---
@@ -203,7 +171,8 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions) -> SkillsSy
         .into_iter()
         .collect();
 
-    let enabled_targets = resolve_target_destinations(config, base_dir, opts.global);
+    let enabled_targets =
+        resolve_target_destinations(config, base_dir, opts.global, TargetFeature::Skills);
     let collected_set: HashSet<(&str, &str)> = collected
         .iter()
         .map(|(name, agent)| (name.as_str(), agent.as_str()))
@@ -298,89 +267,115 @@ fn sync_instructions(
     opts: &SyncOptions,
 ) -> InstructionsSyncResult {
     let source_path = config.resolve_source_instruction_path(base_dir, opts.global);
-    if !source_path.exists() {
-        return InstructionsSyncResult::default();
-    }
+
+    // 소스가 없으면 에이전트별 지침 파일에서 수집 시도
+    let collected = if !source_path.exists() {
+        match collect_instruction(config, base_dir, &source_path, opts) {
+            Some(collected) => Some(collected),
+            None => return InstructionsSyncResult::default(),
+        }
+    } else {
+        None
+    };
+
+    let dest_map =
+        resolve_target_destinations(config, base_dir, opts.global, TargetFeature::Instructions);
+
+    // dest_map에 없지만 enabled인 에이전트 → source와 동일 경로를 직접 읽는 에이전트(skipped)
+    let skipped: Vec<String> = config
+        .enabled_targets(TargetFeature::Instructions)
+        .filter(|agent| !dest_map.contains_key(agent))
+        .map(|agent| agent.as_str().to_string())
+        .collect();
+
+    // 수집된 에이전트는 이미 심링크 처리됨 (dry-run에서는 아직 실제 파일이므로 제외해야 거짓 충돌 방지)
+    let collected_agent: Option<&str> = collected.as_ref().map(|(_, agent)| agent.as_str());
 
     let mut linked = Vec::new();
-    let mut skipped = Vec::new();
     let mut warnings = Vec::new();
 
-    for agent in config.enabled_targets(TargetFeature::Instructions) {
-        let agent_name = agent.as_str();
-
-        let Some(link_path) =
-            config.resolve_target_instruction_path(agent_name, base_dir, opts.global)
-        else {
-            continue;
-        };
-        let display_name = config
-            .target_instruction_path(agent_name, opts.global)
-            .unwrap_or(agent_name);
-
-        if link_path == source_path {
-            skipped.push(agent_name.to_string());
+    for (agent, dest_path) in &dest_map {
+        if collected_agent == Some(agent.as_str()) {
             continue;
         }
 
-        match link_instruction(&source_path, &link_path, display_name, opts) {
-            InstructionLinkOutcome::Linked => linked.push(agent_name.to_string()),
-            InstructionLinkOutcome::AlreadyValid => {}
-            InstructionLinkOutcome::Warning(w) => warnings.push(w),
+        let display_name = config
+            .target_instruction_path(agent.as_str(), opts.global)
+            .unwrap_or(agent.as_str());
+
+        match link_one(&source_path, dest_path, opts.dry_run, opts.force) {
+            LinkOutcome::Created => linked.push(agent.as_str().to_string()),
+            LinkOutcome::AlreadyValid => {}
+            LinkOutcome::Conflict => {
+                warnings.push(SyncWarning::InstructionConflict {
+                    file: display_name.to_string(),
+                });
+            }
+            LinkOutcome::Failed(detail) => {
+                warnings.push(SyncWarning::IoFailed {
+                    operation: format!("지침 심링크 ({})", display_name),
+                    detail,
+                });
+            }
         }
     }
 
     InstructionsSyncResult {
+        collected,
         linked,
         skipped,
         warnings,
     }
 }
 
-fn link_instruction(
+/// 소스 지침 파일이 없을 때, 에이전트별 지침 파일(CLAUDE.md 등)에서 수집한다.
+/// 심링크가 아닌 실제 파일을 찾아 소스 경로로 이동하고 심링크를 생성한다.
+fn collect_instruction(
+    config: &Config,
+    base_dir: &Path,
     source_path: &Path,
-    link_path: &Path,
-    display_name: &str,
     opts: &SyncOptions,
-) -> InstructionLinkOutcome {
-    // 이미 올바른 심링크면 스킵
-    if link_path.is_symlink() {
-        if let Ok(target) = fs::read_link(link_path) {
-            if target == source_path {
-                return InstructionLinkOutcome::AlreadyValid;
-            }
-        }
-    }
+) -> Option<(String, String)> {
+    let dest_map =
+        resolve_target_destinations(config, base_dir, opts.global, TargetFeature::Instructions);
 
-    // 실제 파일 충돌
-    if link_path.exists() && !link_path.is_symlink() {
-        if opts.force {
-            if !opts.dry_run {
-                let _ = fs::remove_file(link_path);
+    // 심링크가 아닌 실제 파일이 있는 에이전트를 찾는다
+    let candidate = AgentName::iter()
+        .filter(|agent| dest_map.contains_key(agent))
+        .find_map(|agent| {
+            let path = dest_map.get(&agent)?;
+            if path.exists() && !path.is_symlink() && path.is_file() {
+                Some((agent, path.clone()))
+            } else {
+                None
             }
-        } else {
-            return InstructionLinkOutcome::Warning(SyncWarning::InstructionConflict {
-                file: display_name.to_string(),
-            });
-        }
-    }
+        });
+
+    let (agent, agent_path) = candidate?;
 
     if !opts.dry_run {
-        if let Some(parent) = link_path.parent() {
-            let _ = fs::create_dir_all(parent);
+        if let Err(e) = fs::rename(&agent_path, source_path) {
+            eprintln!(
+                "  ⚠️  지침 수집 실패 ({} → {}): {e}",
+                agent_path.display(),
+                source_path.display()
+            );
+            return None;
         }
-        if link_path.is_symlink() {
-            let _ = fs::remove_file(link_path);
-        }
-        if let Err(e) = std::os::unix::fs::symlink(source_path, link_path) {
-            return InstructionLinkOutcome::Warning(SyncWarning::IoFailed {
-                operation: format!("지침 심링크 ({display_name})"),
-                detail: e.to_string(),
-            });
+        // 원래 위치에 심링크 생성
+        if let Err(e) = std::os::unix::fs::symlink(source_path, &agent_path) {
+            eprintln!(
+                "  ⚠️  심링크 생성 실패 ({}): {e}",
+                agent_path.display()
+            );
         }
     }
 
-    InstructionLinkOutcome::Linked
+    let display_name = config
+        .target_instruction_path(agent.as_str(), opts.global)
+        .unwrap_or(agent.as_str());
+
+    Some((display_name.to_string(), agent.as_str().to_string()))
 }
 
 #[cfg(test)]
@@ -401,7 +396,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         setup_source(tmp.path());
 
-        let result = execute(&Config::default(), tmp.path(), &SyncOptions::default());
+        let result = run(&Config::default(), tmp.path(), &SyncOptions::default());
 
         assert!(tmp.path().join(".claude/skills/my-skill").is_symlink());
         assert!(tmp.path().join(".pi/skills/my-skill").is_symlink());
@@ -419,8 +414,8 @@ mod tests {
         setup_source(tmp.path());
         let config = Config::default();
 
-        execute(&config, tmp.path(), &SyncOptions::default());
-        let result = execute(&config, tmp.path(), &SyncOptions::default());
+        run(&config, tmp.path(), &SyncOptions::default());
+        let result = run(&config, tmp.path(), &SyncOptions::default());
 
         assert!(result.skills_linked.is_empty());
         assert!(result.instructions_linked.is_empty());
@@ -435,7 +430,7 @@ mod tests {
         fs::create_dir_all(&pi_new).unwrap();
         fs::write(pi_new.join("SKILL.md"), "# New").unwrap();
 
-        let result = execute(&Config::default(), tmp.path(), &SyncOptions::default());
+        let result = run(&Config::default(), tmp.path(), &SyncOptions::default());
 
         assert!(tmp.path().join(".agents/skills/new-skill").is_dir());
         assert!(tmp.path().join(".pi/skills/new-skill").is_symlink());
@@ -455,7 +450,7 @@ mod tests {
         config.source.instruction_path_global = "AGENTS.md".to_string();
 
         let opts = SyncOptions { global: true, ..Default::default() };
-        execute(&config, tmp.path(), &opts);
+        run(&config, tmp.path(), &opts);
 
         assert!(tmp.path().join(".claude/CLAUDE.md").is_symlink());
         assert!(tmp.path().join(".codex/AGENTS.md").is_symlink());
@@ -472,7 +467,7 @@ mod tests {
         fs::create_dir_all(&claude_dir).unwrap();
         symlink("/nonexistent/deleted-skill", claude_dir.join("old-skill")).unwrap();
 
-        let result = execute(&Config::default(), tmp.path(), &SyncOptions::default());
+        let result = run(&Config::default(), tmp.path(), &SyncOptions::default());
 
         assert!(!claude_dir.join("old-skill").is_symlink());
         assert!(!result.cleaned.is_empty());
@@ -484,7 +479,7 @@ mod tests {
         setup_source(tmp.path());
 
         let opts = SyncOptions { dry_run: true, ..Default::default() };
-        let result = execute(&Config::default(), tmp.path(), &opts);
+        let result = run(&Config::default(), tmp.path(), &opts);
 
         assert!(!result.skills_linked.is_empty());
         assert!(!tmp.path().join(".claude/skills/my-skill").exists());
@@ -499,10 +494,89 @@ mod tests {
         fs::write(pi_skill.join("SKILL.md"), "# New").unwrap();
 
         let opts = SyncOptions { dry_run: true, ..Default::default() };
-        let result = execute(&Config::default(), tmp.path(), &opts);
+        let result = run(&Config::default(), tmp.path(), &opts);
 
         assert!(result.skills_collected.iter().any(|(n, a)| n == "new-skill" && a == "pi"));
         assert!(result.skills_linked.iter().any(|(n, a)| n == "new-skill" && a == "pi"));
         assert!(!result.warnings.iter().any(|w| matches!(w, SyncWarning::FileConflict { agent, .. } if agent == "pi")));
+    }
+
+    #[test]
+    fn test_sync_collects_instruction_from_claude_md() {
+        let tmp = TempDir::new().unwrap();
+        // AGENTS.md 없이 CLAUDE.md만 존재
+        fs::write(tmp.path().join("CLAUDE.md"), "# Claude Instructions").unwrap();
+
+        let result = run(&Config::default(), tmp.path(), &SyncOptions::default());
+
+        // CLAUDE.md가 AGENTS.md로 이동됨
+        assert!(tmp.path().join("AGENTS.md").is_file());
+        assert!(!tmp.path().join("AGENTS.md").is_symlink());
+        assert_eq!(
+            fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap(),
+            "# Claude Instructions"
+        );
+        // CLAUDE.md는 심링크로 변환됨
+        assert!(tmp.path().join("CLAUDE.md").is_symlink());
+        assert_eq!(
+            fs::read_link(tmp.path().join("CLAUDE.md")).unwrap(),
+            tmp.path().join("AGENTS.md")
+        );
+        // 수집 결과 확인
+        assert!(result.instructions_collected.is_some());
+        let (file, agent) = result.instructions_collected.unwrap();
+        assert_eq!(file, "CLAUDE.md");
+        assert_eq!(agent, "claude");
+    }
+
+    #[test]
+    fn test_sync_collects_instruction_dry_run() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("CLAUDE.md"), "# Claude Instructions").unwrap();
+
+        let opts = SyncOptions { dry_run: true, ..Default::default() };
+        let result = run(&Config::default(), tmp.path(), &opts);
+
+        // dry-run이므로 파일 이동 없음
+        assert!(!tmp.path().join("AGENTS.md").exists());
+        assert!(tmp.path().join("CLAUDE.md").is_file());
+        assert!(!tmp.path().join("CLAUDE.md").is_symlink());
+        // 수집 계획은 표시됨
+        assert!(result.instructions_collected.is_some());
+        // 수집 대상에 대한 거짓 충돌 경고가 없어야 함
+        assert!(!result.warnings.iter().any(|w| matches!(
+            w,
+            SyncWarning::InstructionConflict { file } if file == "CLAUDE.md"
+        )));
+    }
+
+    #[test]
+    fn test_sync_no_collect_when_agents_md_exists() {
+        let tmp = TempDir::new().unwrap();
+        // AGENTS.md와 CLAUDE.md 모두 존재 (CLAUDE.md는 실제 파일)
+        fs::write(tmp.path().join("AGENTS.md"), "# Source").unwrap();
+        fs::write(tmp.path().join("CLAUDE.md"), "# Claude").unwrap();
+
+        let opts = SyncOptions { force: true, ..Default::default() };
+        let result = run(&Config::default(), tmp.path(), &opts);
+
+        // AGENTS.md가 이미 있으므로 수집하지 않음
+        assert!(result.instructions_collected.is_none());
+        // AGENTS.md 내용은 변경되지 않음
+        assert_eq!(
+            fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap(),
+            "# Source"
+        );
+    }
+
+    #[test]
+    fn test_sync_no_instruction_when_nothing_exists() {
+        let tmp = TempDir::new().unwrap();
+        // 아무 지침 파일도 없음
+
+        let result = run(&Config::default(), tmp.path(), &SyncOptions::default());
+
+        assert!(result.instructions_collected.is_none());
+        assert!(result.instructions_linked.is_empty());
     }
 }

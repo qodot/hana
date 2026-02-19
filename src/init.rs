@@ -1,6 +1,16 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+// --- Options ---
+
+pub struct InitOptions {
+    pub global: bool,
+    pub force: bool,
+    pub dry_run: bool,
+}
+
+// --- Ok ---
+
 #[derive(Debug)]
 pub enum InitOk {
     /// 설정 파일 생성 완료
@@ -8,6 +18,8 @@ pub enum InitOk {
     /// dry-run: 내용만 출력
     DryRun { path: String, content: String },
 }
+
+// --- Error ---
 
 #[derive(Debug)]
 pub enum InitError {
@@ -23,8 +35,6 @@ pub enum InitError {
         path: PathBuf,
         source: std::io::Error,
     },
-    /// 홈 디렉토리를 찾을 수 없음
-    NoHomeDir,
 }
 
 impl std::fmt::Display for InitError {
@@ -43,10 +53,51 @@ impl std::fmt::Display for InitError {
             Self::WriteFile { path, source } => {
                 write!(f, "파일 생성 실패 ({}): {source}", path.display())
             }
-            Self::NoHomeDir => write!(f, "홈 디렉토리를 찾을 수 없습니다."),
         }
     }
 }
+
+// --- pub fn run ---
+
+pub fn run(opts: &InitOptions, base_dir: &Path) -> Result<InitOk, InitError> {
+    let template = config_template(opts.global);
+
+    if opts.dry_run {
+        let path = if opts.global {
+            "~/.agents/hana.toml"
+        } else {
+            ".agents/hana.toml"
+        };
+        return Ok(InitOk::DryRun {
+            path: path.to_string(),
+            content: template.to_string(),
+        });
+    }
+
+    let config_path = base_dir.join(".agents").join("hana.toml");
+
+    if config_path.exists() && !opts.force {
+        return Err(InitError::AlreadyExists { path: config_path });
+    }
+
+    if let Some(parent) = config_path.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent).map_err(|e| InitError::CreateDir {
+                path: parent.to_path_buf(),
+                source: e,
+            })?;
+        }
+    }
+
+    fs::write(&config_path, template).map_err(|e| InitError::WriteFile {
+        path: config_path.clone(),
+        source: e,
+    })?;
+
+    Ok(InitOk::Created { path: config_path })
+}
+
+// --- Internal ---
 
 pub const PROJECT_CONFIG: &str = r#"# hana - AI 코딩 에이전트 동기화 설정
 # https://github.com/qodot/hana
@@ -132,66 +183,12 @@ instruction_path = "AGENTS.md"
 instruction_path_global = ".config/opencode/AGENTS.md"
 "#;
 
-pub struct InitOptions {
-    pub global: bool,
-    pub force: bool,
-    pub dry_run: bool,
-}
-
 fn config_template(global: bool) -> &'static str {
     if global {
         GLOBAL_CONFIG
     } else {
         PROJECT_CONFIG
     }
-}
-
-pub fn execute(opts: &InitOptions, base_dir: &Path) -> Result<InitOk, InitError> {
-    let template = config_template(opts.global);
-
-    if opts.dry_run {
-        let path = if opts.global {
-            "~/.agents/hana.toml"
-        } else {
-            ".agents/hana.toml"
-        };
-        return Ok(InitOk::DryRun {
-            path: path.to_string(),
-            content: template.to_string(),
-        });
-    }
-
-    let config_path = base_dir.join(".agents").join("hana.toml");
-
-    if config_path.exists() && !opts.force {
-        return Err(InitError::AlreadyExists { path: config_path });
-    }
-
-    if let Some(parent) = config_path.parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent).map_err(|e| InitError::CreateDir {
-                path: parent.to_path_buf(),
-                source: e,
-            })?;
-        }
-    }
-
-    fs::write(&config_path, template).map_err(|e| InitError::WriteFile {
-        path: config_path.clone(),
-        source: e,
-    })?;
-
-    Ok(InitOk::Created { path: config_path })
-}
-
-pub fn run(opts: &InitOptions) -> Result<InitOk, InitError> {
-    let base_dir = if opts.global {
-        dirs::home_dir().ok_or(InitError::NoHomeDir)?
-    } else {
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-    };
-
-    execute(opts, &base_dir)
 }
 
 #[cfg(test)]
@@ -210,7 +207,7 @@ mod tests {
     #[test]
     fn test_init_creates_config() {
         let tmp = TempDir::new().unwrap();
-        let result = execute(&opts(false, false, false), tmp.path());
+        let result = run(&opts(false, false, false), tmp.path());
         assert!(matches!(result, Ok(InitOk::Created { .. })));
 
         let config = tmp.path().join(".agents").join("hana.toml");
@@ -225,7 +222,7 @@ mod tests {
         fs::create_dir_all(&agents_dir).unwrap();
         fs::write(agents_dir.join("hana.toml"), "existing").unwrap();
 
-        let result = execute(&opts(false, false, false), tmp.path());
+        let result = run(&opts(false, false, false), tmp.path());
         assert!(matches!(result, Err(InitError::AlreadyExists { .. })));
     }
 
@@ -236,7 +233,7 @@ mod tests {
         fs::create_dir_all(&agents_dir).unwrap();
         fs::write(agents_dir.join("hana.toml"), "old content").unwrap();
 
-        let result = execute(&opts(false, true, false), tmp.path());
+        let result = run(&opts(false, true, false), tmp.path());
         assert!(matches!(result, Ok(InitOk::Created { .. })));
 
         let content = fs::read_to_string(agents_dir.join("hana.toml")).unwrap();
@@ -246,7 +243,7 @@ mod tests {
     #[test]
     fn test_init_dry_run() {
         let tmp = TempDir::new().unwrap();
-        let result = execute(&opts(false, false, true), tmp.path());
+        let result = run(&opts(false, false, true), tmp.path());
         assert!(matches!(result, Ok(InitOk::DryRun { .. })));
 
         if let Ok(InitOk::DryRun { path, content }) = result {
@@ -260,7 +257,7 @@ mod tests {
     #[test]
     fn test_init_global_uses_global_template() {
         let tmp = TempDir::new().unwrap();
-        let result = execute(&opts(true, false, false), tmp.path());
+        let result = run(&opts(true, false, false), tmp.path());
         assert!(matches!(result, Ok(InitOk::Created { .. })));
 
         let content = fs::read_to_string(tmp.path().join(".agents/hana.toml")).unwrap();
@@ -272,7 +269,7 @@ mod tests {
     #[test]
     fn test_init_dry_run_global_shows_global_template() {
         let tmp = TempDir::new().unwrap();
-        let result = execute(&opts(true, false, true), tmp.path());
+        let result = run(&opts(true, false, true), tmp.path());
         if let Ok(InitOk::DryRun { content, .. }) = result {
             assert!(content.contains("~/.agents/skills"));
         } else {
@@ -283,7 +280,7 @@ mod tests {
     #[test]
     fn test_init_global_uses_base_dir() {
         let tmp = TempDir::new().unwrap();
-        let result = execute(&opts(true, false, false), tmp.path());
+        let result = run(&opts(true, false, false), tmp.path());
         assert!(matches!(result, Ok(InitOk::Created { .. })));
 
         let config = tmp.path().join(".agents").join("hana.toml");
@@ -295,7 +292,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         assert!(!tmp.path().join(".agents").exists());
 
-        execute(&opts(false, false, false), tmp.path()).unwrap();
+        run(&opts(false, false, false), tmp.path()).unwrap();
         assert!(tmp.path().join(".agents").exists());
     }
 }

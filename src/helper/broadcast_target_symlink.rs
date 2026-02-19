@@ -67,14 +67,14 @@ pub fn broadcast_target_symlink(
     }
 }
 
-enum LinkOutcome {
+pub enum LinkOutcome {
     Created,
     AlreadyValid,
     Conflict,
     Failed(String),
 }
 
-fn link_one(source: &Path, dest: &Path, dry_run: bool, force: bool) -> LinkOutcome {
+pub fn link_one(source: &Path, dest: &Path, dry_run: bool, force: bool) -> LinkOutcome {
     // 이미 올바른 심링크면 스킵
     if dest.is_symlink() {
         if let Ok(target) = fs::read_link(dest) {

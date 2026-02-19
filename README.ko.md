@@ -1,4 +1,4 @@
-# hana 🌸
+# hana(하나) 🌸
 
 [![Crates.io](https://img.shields.io/crates/v/hanacli)](https://crates.io/crates/hanacli)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)

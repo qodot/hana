@@ -51,7 +51,7 @@ Symlink each skill directory from the source to each agent's path.
 
 Codex uses the same path as the source, so no symlink is needed.
 
-### Reverse Collection (Agents → Source)
+### Collection (Agents → Source)
 
 Detects real directories (not symlinks) in each agent's path as new skills.
 
@@ -115,7 +115,7 @@ When a non-symlink file/directory already exists at a symlink target:
 No lock files or state files. The filesystem is the state.
 
 - Symlink → already synced
-- Real directory → new skill (reverse collection target)
+- Real directory → new skill (collection target)
 - Broken symlink → source was deleted (cleanup target)
 
 ## CLI Commands
@@ -159,7 +159,7 @@ All values default to `true`. Set to `false` to disable sync for a specific agen
 ### `hana sync`
 
 1. Read config (`.agents/hana.toml`)
-2. Reverse collection: detect new skills in agent paths → move to source
+2. Collection: detect new skills in agent paths → move to source
 3. Forward sync: create symlinks from source to agent paths
 4. Instruction sync: symlink source instructions to each agent's filename
 5. Cleanup: remove broken symlinks

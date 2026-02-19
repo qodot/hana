@@ -6,53 +6,85 @@ use crate::error::{InitError, InitOk};
 pub const PROJECT_CONFIG: &str = r#"# hana - AI 코딩 에이전트 동기화 설정
 # https://github.com/qodot/hana
 
-[skills]
-source = ".agents/skills"
+[source]
+skills_path = ".agents/skills"
+skills_path_global = "~/.agents/skills"
+instruction_path = "AGENTS.md"
+instruction_path_global = "~/.agents/AGENTS.md"
 
-[instructions]
-source = "AGENTS.md"
-
-[targets.claude]
+[target.claude]
 skills = true
 instructions = true
+skills_path = ".claude/skills"
+skills_path_global = ".claude/skills"
+instruction_path = "CLAUDE.md"
+instruction_path_global = ".claude/CLAUDE.md"
 
-[targets.codex]
+[target.codex]
 skills = true
 instructions = true
+skills_path = ".agents/skills"
+skills_path_global = ".agents/skills"
+instruction_path = "AGENTS.md"
+instruction_path_global = ".codex/AGENTS.md"
 
-[targets.pi]
+[target.pi]
 skills = true
 instructions = true
+skills_path = ".pi/skills"
+skills_path_global = ".pi/agent/skills"
+instruction_path = "AGENTS.md"
+instruction_path_global = ".pi/agent/AGENTS.md"
 
-[targets.opencode]
+[target.opencode]
 skills = true
 instructions = true
+skills_path = ".opencode/skills"
+skills_path_global = ".config/opencode/skills"
+instruction_path = "AGENTS.md"
+instruction_path_global = ".config/opencode/AGENTS.md"
 "#;
 
 pub const GLOBAL_CONFIG: &str = r#"# hana - AI 코딩 에이전트 글로벌 동기화 설정
 # https://github.com/qodot/hana
 
-[skills]
-source = "~/.agents/skills"
+[source]
+skills_path = ".agents/skills"
+skills_path_global = "~/.agents/skills"
+instruction_path = "AGENTS.md"
+instruction_path_global = "~/.agents/AGENTS.md"
 
-[instructions]
-source = "~/.agents/AGENTS.md"
-
-[targets.claude]
+[target.claude]
 skills = true
 instructions = true
+skills_path = ".claude/skills"
+skills_path_global = ".claude/skills"
+instruction_path = "CLAUDE.md"
+instruction_path_global = ".claude/CLAUDE.md"
 
-[targets.codex]
+[target.codex]
 skills = true
 instructions = true
+skills_path = ".agents/skills"
+skills_path_global = ".agents/skills"
+instruction_path = "AGENTS.md"
+instruction_path_global = ".codex/AGENTS.md"
 
-[targets.pi]
+[target.pi]
 skills = true
 instructions = true
+skills_path = ".pi/skills"
+skills_path_global = ".pi/agent/skills"
+instruction_path = "AGENTS.md"
+instruction_path_global = ".pi/agent/AGENTS.md"
 
-[targets.opencode]
+[target.opencode]
 skills = true
 instructions = true
+skills_path = ".opencode/skills"
+skills_path_global = ".config/opencode/skills"
+instruction_path = "AGENTS.md"
+instruction_path_global = ".config/opencode/AGENTS.md"
 "#;
 
 pub struct InitOptions {
@@ -87,9 +119,7 @@ pub fn execute(opts: &InitOptions, base_dir: &Path) -> Result<InitOk, InitError>
     let config_path = base_dir.join(".agents").join("hana.toml");
 
     if config_path.exists() && !opts.force {
-        return Err(InitError::AlreadyExists {
-            path: config_path,
-        });
+        return Err(InitError::AlreadyExists { path: config_path });
     }
 
     if let Some(parent) = config_path.parent() {

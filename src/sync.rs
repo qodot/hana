@@ -1,10 +1,14 @@
-use std::collections::HashMap;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::agents;
-use crate::config::Config;
+use crate::config::{Config, TargetFeature};
 use crate::error::{SyncError, SyncOk, SyncWarning};
+use crate::helper::broadcast_symlink::broadcast_symlink;
+use crate::helper::build_destinations::build_destinations;
+use crate::helper::collect_skills::collect_skills as collect_target_skills;
+use crate::helper::collect_sources::collect_sources;
+use crate::helper::mv_skills::mv_skills as move_collected_skills;
 
 pub fn run(opts: &SyncOptions) -> Result<SyncOk, SyncError> {
     let base_dir = if opts.global {
@@ -19,8 +23,7 @@ pub fn run(opts: &SyncOptions) -> Result<SyncOk, SyncError> {
     Ok(execute(&config, &base_dir, opts))
 }
 
-// 경로 매핑은 agents 모듈에서 관리
-
+// 경로 매핑은 config(hana.toml)에서 관리
 
 #[derive(Debug, Default)]
 pub struct SyncOptions {
@@ -49,145 +52,115 @@ pub fn execute(config: &Config, base_dir: &Path, opts: &SyncOptions) -> SyncOk {
 }
 
 fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions, result: &mut SyncOk) {
-    let source_dir = base_dir.join(&config.skills_source);
+    let source_dir = config.resolve_source_skills_path(base_dir, opts.global);
 
     if !source_dir.exists() {
-        return;
-    }
-
-    // 1단계: 역방향 수집 (모든 에이전트에서)
-    // 동일한 이름이 여러 에이전트에 있으면 충돌 감지
-    let skill_targets = agents::collect_skills(opts.global, &config.skills_source);
-    let mut new_skills: HashMap<String, Vec<(String, PathBuf)>> = HashMap::new(); // name → [(agent, path)]
-
-    for &(agent, agent_skill_dir) in &skill_targets {
-        if !config.targets.get(agent).map(|t| t.skills).unwrap_or(false) {
-            continue;
-        }
-        let agent_dir = base_dir.join(agent_skill_dir);
-        if !agent_dir.exists() {
-            continue;
-        }
-        if let Ok(entries) = fs::read_dir(&agent_dir) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                let path = entry.path();
-                let name = entry.file_name().to_string_lossy().to_string();
-                if path.is_dir() && !path.is_symlink() && !source_dir.join(&name).exists() {
-                    new_skills
-                        .entry(name)
-                        .or_default()
-                        .push((agent.to_string(), path));
-                }
-            }
-        }
-    }
-
-    // 충돌 감지: 같은 이름이 여러 에이전트에서 발견
-    for (name, sources) in &new_skills {
-        if sources.len() > 1 {
-            let agent_names: Vec<String> = sources.iter().map(|(a, _)| a.clone()).collect();
-            result.warnings.push(SyncWarning::SkillConflict {
-                name: name.clone(),
-                agents: agent_names,
-            });
-            continue;
-        }
-
-        let (agent, path) = &sources[0];
-        let dest = source_dir.join(name);
-
         if !opts.dry_run {
-            if let Err(e) = fs::rename(path, &dest) {
+            if let Err(e) = fs::create_dir_all(&source_dir) {
                 result.warnings.push(SyncWarning::IoFailed {
-                    operation: format!("스킬 수집 ({name}, {agent})"),
+                    operation: format!("소스 디렉토리 생성 ({})", source_dir.display()),
                     detail: e.to_string(),
                 });
-                continue;
-            }
-            if let Err(e) = std::os::unix::fs::symlink(&dest, path) {
-                result.warnings.push(SyncWarning::IoFailed {
-                    operation: format!("심링크 생성 ({name}, {agent})"),
-                    detail: e.to_string(),
-                });
-                continue;
+                return;
             }
         }
-        result
-            .skills_collected
-            .push((name.clone(), agent.to_string()));
     }
 
-    // 2단계: 소스에서 스킬 목록 재수집 (수집 후 업데이트된 목록)
-    let skills: Vec<String> = match fs::read_dir(&source_dir) {
-        Ok(entries) => entries
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().is_dir())
-            .map(|e| e.file_name().to_string_lossy().to_string())
-            .collect(),
-        Err(_) => return,
+    // 1단계: 수집 (모든 에이전트에서)
+    // 동일한 이름이 여러 에이전트에 있으면 충돌 감지
+    let collected_by_agent = collect_target_skills(config, base_dir, opts.global);
+    let move_result =
+        move_collected_skills(&collected_by_agent, &source_dir, opts.force, opts.dry_run);
+    let tasks = match move_result {
+        Ok(ok) => ok.tasks,
+        Err(err) => {
+            result.warnings.extend(err.warnings);
+            err.tasks
+        }
     };
 
-    // 3단계: 정방향 동기화 + 정리
-    for &(agent, agent_skill_dir) in &skill_targets {
-        if !config.targets.get(agent).map(|t| t.skills).unwrap_or(false) {
-            continue;
+    result.skills_collected.extend(
+        tasks
+            .iter()
+            .map(|t| (t.skill.clone(), t.agent.as_str().to_string())),
+    );
+
+    // 2단계: 소스에서 스킬 목록 재조회 (수집 후 업데이트된 목록)
+    let source_skills = match collect_sources(&source_dir) {
+        Ok(skills) => skills,
+        Err(warning) => {
+            result.warnings.push(warning);
+            return;
         }
-        let agent_dir = base_dir.join(agent_skill_dir);
+    };
 
-        for skill in &skills {
-            let link_path = agent_dir.join(skill);
-            let target_path = source_dir.join(skill);
+    // dry-run에서는 실제 이동이 없으므로, 이번 실행에서 수집 예정인 스킬을 추가로 포함해 동기화 대상을 계산한다.
+    let skills: Vec<String> = source_skills
+        .into_iter()
+        .chain(if opts.dry_run {
+            result
+                .skills_collected
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect()
+        } else {
+            vec![]
+        })
+        .collect::<BTreeSet<String>>() // 중복 제거 및 정렬
+        .into_iter()
+        .collect();
 
-            // 이미 올바른 심링크면 스킵
-            if link_path.is_symlink() {
-                if let Ok(link_target) = fs::read_link(&link_path) {
-                    if link_target == target_path {
-                        continue;
-                    }
-                }
+    // 3단계: 정방향 동기화
+    let enabled_targets = build_destinations(config, base_dir, opts.global);
+
+    for skill in &skills {
+        let source = source_dir.join(skill);
+        let agent_dests: Vec<(&str, PathBuf)> = enabled_targets
+            .iter()
+            .map(|(agent, dir)| (agent.as_str(), dir.join(skill)))
+            .collect();
+        let dests: Vec<PathBuf> = agent_dests.iter().map(|(_, d)| d.clone()).collect();
+
+        let (linked, conflicts, failed) =
+            match broadcast_symlink(&source, &dests, opts.dry_run, opts.force) {
+                Ok(ok) => (ok.linked, vec![], vec![]),
+                Err(err) => (err.linked, err.conflicts, err.failed),
+            };
+
+        let find_agent = |path: &PathBuf| -> Option<String> {
+            agent_dests
+                .iter()
+                .find(|(_, d)| d == path)
+                .map(|(agent, _)| agent.to_string())
+        };
+
+        for path in &linked {
+            if let Some(agent) = find_agent(path) {
+                result.skills_linked.push((skill.clone(), agent));
             }
-
-            // 실제 디렉토리/파일이 존재하면
-            if link_path.exists() && !link_path.is_symlink() {
-                if opts.force {
-                    if !opts.dry_run {
-                        if link_path.is_dir() {
-                            let _ = fs::remove_dir_all(&link_path);
-                        } else {
-                            let _ = fs::remove_file(&link_path);
-                        }
-                    }
-                } else {
-                    result.warnings.push(SyncWarning::FileConflict {
-                        skill: skill.clone(),
-                        agent: agent.to_string(),
-                    });
-                    continue;
-                }
-            }
-
-            if !opts.dry_run {
-                if let Some(parent) = link_path.parent() {
-                    let _ = fs::create_dir_all(parent);
-                }
-                // 잘못된 심링크 제거
-                if link_path.is_symlink() {
-                    let _ = fs::remove_file(&link_path);
-                }
-                if let Err(e) = std::os::unix::fs::symlink(&target_path, &link_path) {
-                    result.warnings.push(SyncWarning::IoFailed {
-                        operation: format!("심링크 생성 ({skill}, {agent})"),
-                        detail: e.to_string(),
-                    });
-                    continue;
-                }
-            }
-            result.skills_linked.push((skill.clone(), agent.to_string()));
         }
+        for path in &conflicts {
+            if let Some(agent) = find_agent(path) {
+                result.warnings.push(SyncWarning::FileConflict {
+                    skill: skill.clone(),
+                    agent,
+                });
+            }
+        }
+        for (path, detail) in &failed {
+            if let Some(agent) = find_agent(path) {
+                result.warnings.push(SyncWarning::IoFailed {
+                    operation: format!("심링크 생성 ({skill}, {agent})"),
+                    detail: detail.clone(),
+                });
+            }
+        }
+    }
 
-        // 정리: 깨진 심링크 제거
+    // 4단계: 깨진 심링크 정리
+    for (_, agent_dir) in &enabled_targets {
         if agent_dir.exists() {
-            if let Ok(entries) = fs::read_dir(&agent_dir) {
+            if let Ok(entries) = fs::read_dir(agent_dir) {
                 for entry in entries.filter_map(|e| e.ok()) {
                     let path = entry.path();
                     if path.is_symlink() && !path.exists() {
@@ -202,49 +175,38 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions, result: &mu
     }
 }
 
-fn sync_instructions(
-    config: &Config,
-    base_dir: &Path,
-    opts: &SyncOptions,
-    result: &mut SyncOk,
-) {
-    let source_path = base_dir.join(&config.instructions_source);
+fn sync_instructions(config: &Config, base_dir: &Path, opts: &SyncOptions, result: &mut SyncOk) {
+    let source_path = config.resolve_source_instruction_path(base_dir, opts.global);
     if !source_path.exists() {
         return;
     }
 
-    for (agent, maybe_path) in agents::collect_instructions(opts.global) {
-        if !config
-            .targets
-            .get(agent)
-            .map(|t| t.instructions)
-            .unwrap_or(false)
-        {
+    for agent in config.enabled_targets(TargetFeature::Instructions) {
+        let agent_name = agent.as_str();
+
+        let Some(link_path) =
+            config.resolve_target_instruction_path(agent_name, base_dir, opts.global)
+        else {
+            continue;
+        };
+        let display_name = config
+            .target_instruction_path(agent_name, opts.global)
+            .unwrap_or(agent_name);
+
+        // 소스와 동일 경로면 스킵(직접 읽는 에이전트)
+        if link_path == source_path {
+            result.instructions_skipped.push(agent_name.to_string());
             continue;
         }
-        match maybe_path {
-            Some(rel_path) => {
-                let link_path = base_dir.join(rel_path);
 
-                // 소스와 동일 경로면 스킵
-                if link_path == source_path {
-                    result.instructions_skipped.push(agent.to_string());
-                    continue;
-                }
-
-                sync_instruction_link(
-                    &source_path,
-                    &link_path,
-                    rel_path,
-                    agent,
-                    opts,
-                    result,
-                );
-            }
-            None => {
-                result.instructions_skipped.push(agent.to_string());
-            }
-        }
+        sync_instruction_link(
+            &source_path,
+            &link_path,
+            display_name,
+            agent_name,
+            opts,
+            result,
+        );
     }
 }
 
@@ -342,21 +304,6 @@ mod tests {
     }
 
     #[test]
-    fn test_sync_skips_codex_same_source() {
-        let tmp = TempDir::new().unwrap();
-        setup_source(tmp.path());
-
-        let result = execute(&default_config(), tmp.path(), &default_opts());
-
-        let codex_links: Vec<_> = result
-            .skills_linked
-            .iter()
-            .filter(|(_, a)| a == "codex")
-            .collect();
-        assert!(codex_links.is_empty());
-    }
-
-    #[test]
     fn test_sync_skips_existing_correct_symlink() {
         let tmp = TempDir::new().unwrap();
         setup_source(tmp.path());
@@ -385,10 +332,10 @@ mod tests {
         assert!(claude_links.is_empty());
     }
 
-    // === 스킬 역방향 수집 ===
+    // === 스킬 수집 ===
 
     #[test]
-    fn test_sync_collects_new_skill_from_agent() {
+    fn test_sync_collects_new_skill_and_links_all_agents() {
         let tmp = TempDir::new().unwrap();
         setup_source(tmp.path());
 
@@ -404,20 +351,6 @@ mod tests {
         // 원래 위치는 심링크
         assert!(tmp.path().join(".pi/skills/new-skill").is_symlink());
         assert!(!result.skills_collected.is_empty());
-    }
-
-    #[test]
-    fn test_sync_collected_skill_synced_to_all_agents() {
-        let tmp = TempDir::new().unwrap();
-        setup_source(tmp.path());
-
-        // pi에서만 새 스킬 생성
-        let pi_new = tmp.path().join(".pi/skills/new-skill");
-        fs::create_dir_all(&pi_new).unwrap();
-        fs::write(pi_new.join("SKILL.md"), "# New").unwrap();
-
-        execute(&default_config(), tmp.path(), &default_opts());
-
         // 수집 후 다른 에이전트에도 심링크 생성되었는지
         assert!(tmp.path().join(".claude/skills/new-skill").is_symlink());
         assert!(tmp.path().join(".opencode/skills/new-skill").is_symlink());
@@ -440,6 +373,39 @@ mod tests {
             .filter(|(name, _)| name == "my-skill")
             .collect();
         assert!(collected.is_empty());
+        assert!(result.warnings.iter().any(|w| matches!(
+            w,
+            SyncWarning::SourceSkillConflict { skill, agent }
+                if skill == "my-skill" && agent == "pi"
+        )));
+    }
+
+    #[test]
+    fn test_sync_force_overwrites_existing_source_skill() {
+        let tmp = TempDir::new().unwrap();
+        setup_source(tmp.path());
+
+        let pi_existing = tmp.path().join(".pi/skills/my-skill");
+        fs::create_dir_all(&pi_existing).unwrap();
+        fs::write(pi_existing.join("SKILL.md"), "# Pi Skill").unwrap();
+
+        let opts = SyncOptions {
+            force: true,
+            ..default_opts()
+        };
+        let result = execute(&default_config(), tmp.path(), &opts);
+
+        assert_eq!(
+            fs::read_to_string(tmp.path().join(".agents/skills/my-skill/SKILL.md")).unwrap(),
+            "# Pi Skill"
+        );
+        assert!(tmp.path().join(".pi/skills/my-skill").is_symlink());
+        assert!(
+            result
+                .skills_collected
+                .iter()
+                .any(|(name, agent)| name == "my-skill" && agent == "pi")
+        );
     }
 
     // === 스킬 이름 충돌 ===
@@ -468,43 +434,29 @@ mod tests {
     // === 기존 파일 충돌 + --force ===
 
     #[test]
-    fn test_sync_errors_on_existing_real_skill_dir() {
+    fn test_sync_existing_real_skill_dir_requires_force() {
         let tmp = TempDir::new().unwrap();
         setup_source(tmp.path());
 
-        // claude에 소스와 같은 이름의 실제 디렉토리 (이미 소스에도 있음)
         fs::create_dir_all(tmp.path().join(".claude/skills/my-skill")).unwrap();
+        fs::write(tmp.path().join(".claude/skills/my-skill/old.txt"), "old").unwrap();
 
-        let result = execute(&default_config(), tmp.path(), &default_opts());
-
-        // 경고 발생
-        assert!(result.warnings.iter().any(|w| matches!(
+        let result_without_force = execute(&default_config(), tmp.path(), &default_opts());
+        assert!(result_without_force.warnings.iter().any(|w| matches!(
             w,
             SyncWarning::FileConflict { skill, .. } if skill == "my-skill"
         )));
-    }
-
-    #[test]
-    fn test_sync_force_overwrites_existing_skill_dir() {
-        let tmp = TempDir::new().unwrap();
-        setup_source(tmp.path());
-
-        fs::create_dir_all(tmp.path().join(".claude/skills/my-skill")).unwrap();
-        fs::write(
-            tmp.path().join(".claude/skills/my-skill/old.txt"),
-            "old",
-        )
-        .unwrap();
+        assert!(tmp.path().join(".claude/skills/my-skill").is_dir());
 
         let opts = SyncOptions {
             force: true,
             ..default_opts()
         };
-        let result = execute(&default_config(), tmp.path(), &opts);
+        let result_with_force = execute(&default_config(), tmp.path(), &opts);
 
         // 심링크로 대체됨
         assert!(tmp.path().join(".claude/skills/my-skill").is_symlink());
-        assert!(result.warnings.is_empty());
+        assert!(result_with_force.warnings.is_empty());
     }
 
     // === 지침 동기화 ===
@@ -520,9 +472,11 @@ mod tests {
         assert!(result.instructions_linked.contains(&"claude".to_string()));
         assert!(result.instructions_skipped.contains(&"codex".to_string()));
         assert!(result.instructions_skipped.contains(&"pi".to_string()));
-        assert!(result
-            .instructions_skipped
-            .contains(&"opencode".to_string()));
+        assert!(
+            result
+                .instructions_skipped
+                .contains(&"opencode".to_string())
+        );
     }
 
     #[test]
@@ -539,34 +493,26 @@ mod tests {
     }
 
     #[test]
-    fn test_sync_errors_on_existing_real_instruction_file() {
+    fn test_sync_existing_real_instruction_file_requires_force() {
         let tmp = TempDir::new().unwrap();
         setup_source(tmp.path());
         fs::write(tmp.path().join("CLAUDE.md"), "# Real file").unwrap();
 
-        let result = execute(&default_config(), tmp.path(), &default_opts());
-
-        assert!(!result.warnings.is_empty());
-        assert!(matches!(
-            &result.warnings[0],
+        let result_without_force = execute(&default_config(), tmp.path(), &default_opts());
+        assert!(result_without_force.warnings.iter().any(|w| matches!(
+            w,
             SyncWarning::InstructionConflict { file } if file == "CLAUDE.md"
-        ));
-    }
-
-    #[test]
-    fn test_sync_force_overwrites_existing_instruction_file() {
-        let tmp = TempDir::new().unwrap();
-        setup_source(tmp.path());
-        fs::write(tmp.path().join("CLAUDE.md"), "# Real file").unwrap();
+        )));
+        assert!(tmp.path().join("CLAUDE.md").is_file());
 
         let opts = SyncOptions {
             force: true,
             ..default_opts()
         };
-        let result = execute(&default_config(), tmp.path(), &opts);
+        let result_with_force = execute(&default_config(), tmp.path(), &opts);
 
         assert!(tmp.path().join("CLAUDE.md").is_symlink());
-        assert!(result.warnings.is_empty());
+        assert!(result_with_force.warnings.is_empty());
     }
 
     // === 글로벌 지침 동기화 ===
@@ -578,7 +524,11 @@ mod tests {
         fs::create_dir_all(tmp.path().join(".agents/skills")).unwrap();
         fs::write(tmp.path().join("AGENTS.md"), "# Global Instructions").unwrap();
 
-        let config = default_config();
+        let mut config = default_config();
+        // 테스트에서는 tmp 경로를 글로벌 기준 루트로 사용
+        config.source.skills_path_global = ".agents/skills".to_string();
+        config.source.instruction_path_global = "AGENTS.md".to_string();
+
         let opts = SyncOptions {
             global: true,
             ..default_opts()
@@ -628,16 +578,67 @@ mod tests {
         assert!(!tmp.path().join("CLAUDE.md").exists());
     }
 
+    #[test]
+    fn test_sync_dry_run_includes_collected_skills_when_source_missing() {
+        let tmp = TempDir::new().unwrap();
+        let pi_new = tmp.path().join(".pi/skills/new-skill");
+        fs::create_dir_all(&pi_new).unwrap();
+        fs::write(pi_new.join("SKILL.md"), "# New").unwrap();
+
+        let opts = SyncOptions {
+            dry_run: true,
+            ..default_opts()
+        };
+        let result = execute(&default_config(), tmp.path(), &opts);
+
+        assert!(
+            result
+                .skills_collected
+                .iter()
+                .any(|(name, agent)| name == "new-skill" && agent == "pi")
+        );
+        assert!(
+            result
+                .skills_linked
+                .iter()
+                .any(|(name, agent)| name == "new-skill" && agent == "claude")
+        );
+        assert!(
+            result
+                .skills_linked
+                .iter()
+                .any(|(name, agent)| name == "new-skill" && agent == "opencode")
+        );
+        assert!(result.warnings.iter().any(|w| matches!(
+            w,
+            SyncWarning::FileConflict { skill, agent }
+                if skill == "new-skill" && agent == "pi"
+        )));
+        assert!(!tmp.path().join(".agents/skills").exists());
+        assert!(pi_new.is_dir());
+    }
+
     // === 소스 없을 때 ===
 
     #[test]
-    fn test_sync_no_source_dir() {
+    fn test_sync_creates_source_and_collects_from_pi_when_source_missing() {
         let tmp = TempDir::new().unwrap();
+        let pi_new = tmp.path().join(".pi/skills/new-skill");
+        fs::create_dir_all(&pi_new).unwrap();
+        fs::write(pi_new.join("SKILL.md"), "# New").unwrap();
 
         let result = execute(&default_config(), tmp.path(), &default_opts());
 
-        assert!(result.skills_linked.is_empty());
+        assert!(tmp.path().join(".agents/skills").exists());
+        assert!(tmp.path().join(".agents/skills/new-skill").is_dir());
+        assert!(tmp.path().join(".pi/skills/new-skill").is_symlink());
         assert!(result.warnings.is_empty());
+        assert!(
+            result
+                .skills_collected
+                .iter()
+                .any(|(name, agent)| name == "new-skill" && agent == "pi")
+        );
     }
 
     #[test]

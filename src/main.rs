@@ -1,6 +1,7 @@
 mod agents;
 mod config;
 mod error;
+mod helper;
 mod init;
 mod status;
 mod sync;

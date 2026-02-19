@@ -1,9 +1,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::agents;
 use crate::config::Config;
-use crate::error::{InstructionState, InstructionStatusEntry, SkillState, SkillStatusEntry, StatusError, StatusOk};
+use crate::error::{
+    InstructionState, InstructionStatusEntry, SkillState, SkillStatusEntry, StatusError, StatusOk,
+};
 
 pub fn run(is_global: bool) -> Result<StatusOk, StatusError> {
     let base_dir = if is_global {
@@ -72,11 +73,11 @@ pub fn format_result(result: &StatusOk) -> String {
     out
 }
 
-// 경로 매핑은 agents 모듈에서 관리
+// 경로 매핑은 config(hana.toml)에서 관리
 // 타입은 error 모듈에서 관리
 
 pub fn execute(config: &Config, base_dir: &Path, global: bool) -> StatusOk {
-    let source_dir = base_dir.join(&config.skills_source);
+    let source_dir = config.resolve_source_skills_path(base_dir, global);
 
     // 소스 스킬 목록
     let mut skill_names: Vec<String> = if source_dir.exists() {
@@ -92,22 +93,32 @@ pub fn execute(config: &Config, base_dir: &Path, global: bool) -> StatusOk {
     };
     skill_names.sort();
 
-    let skill_targets = agents::collect_skills(global, &config.skills_source);
+    let skill_targets: Vec<(String, PathBuf)> = Config::agent_names()
+        .filter_map(|agent| {
+            let name = agent.as_str();
+            let target_dir = config.resolve_target_skills_path(name, base_dir, global)?;
+            if target_dir == source_dir {
+                return None; // 소스와 동일 경로는 상태 대상에서 제외
+            }
+            Some((name.to_string(), target_dir))
+        })
+        .collect();
 
     // 스킬 상태
     let skills = skill_names
         .iter()
         .map(|name| {
+            let expected_target = source_dir.join(name);
             let agent_states: Vec<(String, SkillState)> = skill_targets
                 .iter()
-                .filter_map(|&(agent, agent_dir)| {
+                .filter_map(|(agent, agent_dir)| {
                     let target_config = config.targets.get(agent)?;
                     if !target_config.skills {
-                        return Some((agent.to_string(), SkillState::Missing));
+                        return Some((agent.clone(), SkillState::Missing));
                     }
-                    let link_path = base_dir.join(agent_dir).join(name);
-                    let state = check_skill_state(&link_path, &source_dir.join(name));
-                    Some((agent.to_string(), state))
+                    let link_path = agent_dir.join(name);
+                    let state = check_skill_state(&link_path, &expected_target);
+                    Some((agent.clone(), state))
                 })
                 .collect();
             SkillStatusEntry {
@@ -118,48 +129,46 @@ pub fn execute(config: &Config, base_dir: &Path, global: bool) -> StatusOk {
         .collect();
 
     // 지침 상태
-    let source_path = base_dir.join(&config.instructions_source);
+    let source_path = config.resolve_source_instruction_path(base_dir, global);
     let source_exists = source_path.exists();
 
-    let instruction_agents = agents::collect_instructions(global)
-        .iter()
-        .map(|&(agent, maybe_path)| {
+    let instruction_agents = Config::agent_names()
+        .map(|agent| {
+            let name = agent.as_str();
             let disabled = config
                 .targets
-                .get(agent)
+                .get(name)
                 .map(|t| !t.instructions)
                 .unwrap_or(true);
 
             if disabled {
-                return (agent.to_string(), InstructionState::Disabled);
+                return (name.to_string(), InstructionState::Disabled);
             }
 
-            match maybe_path {
-                Some(rel_path) => {
-                    let link_path = base_dir.join(rel_path);
+            let Some(link_path) = config.resolve_target_instruction_path(name, base_dir, global)
+            else {
+                return (name.to_string(), InstructionState::Missing);
+            };
 
-                    // 소스와 동일 경로면 직접 읽음
-                    if link_path == source_path {
-                        return (agent.to_string(), InstructionState::DirectRead);
-                    }
+            // 소스와 동일 경로면 직접 읽음
+            if link_path == source_path {
+                return (name.to_string(), InstructionState::DirectRead);
+            }
 
-                    if link_path.is_symlink() {
-                        if let Ok(target) = fs::read_link(&link_path) {
-                            if target == source_path {
-                                (agent.to_string(), InstructionState::Synced)
-                            } else {
-                                (agent.to_string(), InstructionState::Missing)
-                            }
-                        } else {
-                            (agent.to_string(), InstructionState::Missing)
-                        }
-                    } else if link_path.exists() {
-                        (agent.to_string(), InstructionState::RealFile)
+            if link_path.is_symlink() {
+                if let Ok(target) = fs::read_link(&link_path) {
+                    if target == source_path {
+                        (name.to_string(), InstructionState::Synced)
                     } else {
-                        (agent.to_string(), InstructionState::Missing)
+                        (name.to_string(), InstructionState::Missing)
                     }
+                } else {
+                    (name.to_string(), InstructionState::Missing)
                 }
-                None => (agent.to_string(), InstructionState::DirectRead),
+            } else if link_path.exists() {
+                (name.to_string(), InstructionState::RealFile)
+            } else {
+                (name.to_string(), InstructionState::Missing)
             }
         })
         .collect();
@@ -167,7 +176,7 @@ pub fn execute(config: &Config, base_dir: &Path, global: bool) -> StatusOk {
     StatusOk {
         skills,
         instructions: InstructionStatusEntry {
-            source: config.instructions_source.clone(),
+            source: config.source_instruction_path(global).to_string(),
             source_exists,
             agents: instruction_agents,
         },
@@ -295,10 +304,20 @@ mod tests {
 
         let result = execute(&config, tmp.path(), false);
 
-        let claude = result.instructions.agents.iter().find(|(a, _)| a == "claude").unwrap();
+        let claude = result
+            .instructions
+            .agents
+            .iter()
+            .find(|(a, _)| a == "claude")
+            .unwrap();
         assert_eq!(claude.1, InstructionState::Synced);
 
-        let codex = result.instructions.agents.iter().find(|(a, _)| a == "codex").unwrap();
+        let codex = result
+            .instructions
+            .agents
+            .iter()
+            .find(|(a, _)| a == "codex")
+            .unwrap();
         assert_eq!(codex.1, InstructionState::DirectRead);
     }
 
@@ -310,7 +329,12 @@ mod tests {
         let config = default_config();
         let result = execute(&config, tmp.path(), false);
 
-        let claude = result.instructions.agents.iter().find(|(a, _)| a == "claude").unwrap();
+        let claude = result
+            .instructions
+            .agents
+            .iter()
+            .find(|(a, _)| a == "claude")
+            .unwrap();
         assert_eq!(claude.1, InstructionState::Missing);
     }
 
@@ -323,7 +347,12 @@ mod tests {
         let config = default_config();
         let result = execute(&config, tmp.path(), false);
 
-        let claude = result.instructions.agents.iter().find(|(a, _)| a == "claude").unwrap();
+        let claude = result
+            .instructions
+            .agents
+            .iter()
+            .find(|(a, _)| a == "claude")
+            .unwrap();
         assert_eq!(claude.1, InstructionState::RealFile);
     }
 
@@ -337,7 +366,12 @@ mod tests {
 
         let result = execute(&config, tmp.path(), false);
 
-        let claude = result.instructions.agents.iter().find(|(a, _)| a == "claude").unwrap();
+        let claude = result
+            .instructions
+            .agents
+            .iter()
+            .find(|(a, _)| a == "claude")
+            .unwrap();
         assert_eq!(claude.1, InstructionState::Disabled);
     }
 

@@ -6,8 +6,8 @@ use crate::config::{AgentName, Config, TargetFeature};
 use crate::config::ConfigError;
 use crate::helper::broadcast_symlink::broadcast_symlink;
 use crate::helper::build_destinations::build_destinations;
-use crate::helper::collect_skills::collect_skills as collect_target_skills;
-use crate::helper::collect_sources::collect_sources;
+use crate::helper::collect_skills::collect_target_skills;
+use crate::helper::collect_sources::collect_source_skills;
 use crate::helper::mv_skills::mv_skills as move_collected_skills;
 
 #[derive(Debug)]
@@ -180,7 +180,7 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions) -> SkillsSy
         .collect();
 
     // 2단계: target에 동기화 (심링크 생성)
-    let source_skills = match collect_sources(&source_dir) {
+    let source_skills = match collect_source_skills(&source_dir) {
         Ok(skills) => skills,
         Err(warning) => {
             return SkillsSyncResult {

@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::sync::SyncWarning;
 
-pub fn collect_sources(source_dir: &Path) -> Result<Vec<String>, SyncWarning> {
+pub fn collect_source_skills(source_dir: &Path) -> Result<Vec<String>, SyncWarning> {
     if !source_dir.exists() {
         return Ok(vec![]);
     }

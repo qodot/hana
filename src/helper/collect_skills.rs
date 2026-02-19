@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::config::{AgentName, Config};
 use crate::helper::build_destinations::build_destinations;
 
-pub fn collect_skills(
+pub fn collect_target_skills(
     config: &Config,
     base_dir: &Path,
     global: bool,
@@ -55,7 +55,7 @@ mod tests {
 
         fs::create_dir_all(tmp.path().join(".pi/skills/pi-skill")).unwrap();
 
-        let result = collect_skills(&config, tmp.path(), false);
+        let result = collect_target_skills(&config, tmp.path(), false);
 
         assert!(!result.contains_key(&AgentName::Codex)); // source와 동일한 경로는 제외
         assert!(!result.contains_key(&AgentName::Pi)); // 대상 비활성화
@@ -72,7 +72,7 @@ mod tests {
         fs::create_dir_all(tmp.path().join(".pi/agent/skills/global-skill")).unwrap();
         fs::create_dir_all(tmp.path().join(".pi/skills/project-skill")).unwrap();
 
-        let result = collect_skills(&config, tmp.path(), true);
+        let result = collect_target_skills(&config, tmp.path(), true);
         let pi_skills = result.get(&AgentName::Pi).unwrap();
         let names: Vec<&str> = pi_skills.iter().map(|(name, _)| name.as_str()).collect();
 
@@ -89,7 +89,7 @@ mod tests {
         fs::create_dir_all(tmp.path().join(".pi/skills/pi-source-skill")).unwrap();
         fs::create_dir_all(tmp.path().join(".claude/skills/claude-skill")).unwrap();
 
-        let result = collect_skills(&config, tmp.path(), false);
+        let result = collect_target_skills(&config, tmp.path(), false);
 
         assert!(!result.contains_key(&AgentName::Pi)); // source와 동일 경로는 제외
         let claude_skills = result.get(&AgentName::Claude).unwrap();

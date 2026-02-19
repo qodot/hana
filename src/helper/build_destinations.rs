@@ -33,29 +33,8 @@ mod tests {
     #[test]
     fn test_build_destinations_filters_disabled_and_source() {
         let tmp = TempDir::new().unwrap();
-        let config = Config::parse(
-            r#"
-[source]
-skills_path = ".agents/skills"
-
-[target.claude]
-skills = true
-instructions = true
-
-[target.codex]
-skills = true
-instructions = true
-
-[target.pi]
-skills = false
-instructions = true
-
-[target.opencode]
-skills = true
-instructions = true
-"#,
-        )
-        .unwrap();
+        let mut config = Config::default();
+        config.targets.get_mut("pi").unwrap().skills = false;
 
         let destinations = build_destinations(&config, tmp.path(), false);
 
@@ -88,29 +67,8 @@ instructions = true
     #[test]
     fn test_build_destinations_respects_custom_source_exclusion() {
         let tmp = TempDir::new().unwrap();
-        let config = Config::parse(
-            r#"
-[source]
-skills_path = ".pi/skills"
-
-[target.claude]
-skills = true
-instructions = true
-
-[target.codex]
-skills = true
-instructions = true
-
-[target.pi]
-skills = true
-instructions = true
-
-[target.opencode]
-skills = true
-instructions = true
-"#,
-        )
-        .unwrap();
+        let mut config = Config::default();
+        config.source.skills_path = ".pi/skills".to_string();
 
         let destinations = build_destinations(&config, tmp.path(), false);
 

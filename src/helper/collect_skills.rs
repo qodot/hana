@@ -40,29 +40,8 @@ mod tests {
     #[test]
     fn test_collect_skills_filters_non_dirs_symlinks_and_disabled_targets() {
         let tmp = TempDir::new().unwrap();
-        let config = Config::parse(
-            r#"
-[source]
-skills_path = ".agents/skills"
-
-[target.claude]
-skills = true
-instructions = true
-
-[target.codex]
-skills = true
-instructions = true
-
-[target.pi]
-skills = false
-instructions = true
-
-[target.opencode]
-skills = true
-instructions = true
-"#,
-        )
-        .unwrap();
+        let mut config = Config::default();
+        config.targets.get_mut("pi").unwrap().skills = false;
 
         let claude_dir = tmp.path().join(".claude/skills");
         fs::create_dir_all(claude_dir.join("real-skill")).unwrap();
@@ -104,29 +83,8 @@ instructions = true
     #[test]
     fn test_collect_skills_respects_custom_source_exclusion() {
         let tmp = TempDir::new().unwrap();
-        let config = Config::parse(
-            r#"
-[source]
-skills_path = ".pi/skills"
-
-[target.claude]
-skills = true
-instructions = true
-
-[target.codex]
-skills = true
-instructions = true
-
-[target.pi]
-skills = true
-instructions = true
-
-[target.opencode]
-skills = true
-instructions = true
-"#,
-        )
-        .unwrap();
+        let mut config = Config::default();
+        config.source.skills_path = ".pi/skills".to_string();
 
         fs::create_dir_all(tmp.path().join(".pi/skills/pi-source-skill")).unwrap();
         fs::create_dir_all(tmp.path().join(".claude/skills/claude-skill")).unwrap();

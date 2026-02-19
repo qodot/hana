@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 
 use crate::config::{AgentName, Config, TargetFeature};
 use crate::config::ConfigError;
-use crate::helper::broadcast_symlink::broadcast_symlink;
-use crate::helper::build_destinations::build_destinations;
-use crate::helper::collect_skills::collect_target_skills;
-use crate::helper::collect_sources::collect_source_skills;
-use crate::helper::mv_skills::mv_skills as move_collected_skills;
+use crate::helper::broadcast_target_symlink::broadcast_target_symlink;
+use crate::helper::collect_source_skills::collect_source_skills;
+use crate::helper::collect_target_skills::collect_target_skills;
+use crate::helper::move_target_skills::move_target_skills;
+use crate::helper::resolve_target_destinations::resolve_target_destinations;
 
 #[derive(Debug)]
 pub enum SyncWarning {
@@ -169,7 +169,7 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions) -> SkillsSy
     // 1단계: source에 모든 스킬 수집
     let collected_by_agent = collect_target_skills(config, base_dir, opts.global);
     let move_result =
-        move_collected_skills(&collected_by_agent, &source_dir, opts.force, opts.dry_run);
+        move_target_skills(&collected_by_agent, &source_dir, opts.force, opts.dry_run);
     let (tasks, move_warnings) = match move_result {
         Ok(ok) => (ok.tasks, vec![]),
         Err(err) => (err.tasks, err.warnings),
@@ -203,7 +203,7 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions) -> SkillsSy
         .into_iter()
         .collect();
 
-    let enabled_targets = build_destinations(config, base_dir, opts.global);
+    let enabled_targets = resolve_target_destinations(config, base_dir, opts.global);
     let (linked, broadcast_warnings) =
         broadcast_skills(&source_dir, &skills, &enabled_targets, opts);
 
@@ -233,7 +233,7 @@ fn broadcast_skills(
     for skill in skills {
         let source = source_dir.join(skill);
         let (ok_linked, conflicts, failed) =
-            match broadcast_symlink(&source, targets, opts.dry_run, opts.force) {
+            match broadcast_target_symlink(&source, targets, opts.dry_run, opts.force) {
                 Ok(ok) => (ok.linked, vec![], vec![]),
                 Err(err) => (err.linked, err.conflicts, err.failed),
             };

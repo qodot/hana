@@ -1,5 +1,5 @@
-pub mod broadcast_symlink;
-pub mod build_destinations;
-pub mod collect_skills;
-pub mod collect_sources;
-pub mod mv_skills;
+pub mod broadcast_target_symlink;
+pub mod collect_source_skills;
+pub mod collect_target_skills;
+pub mod move_target_skills;
+pub mod resolve_target_destinations;

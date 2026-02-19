@@ -3,14 +3,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::{AgentName, Config};
-use crate::helper::build_destinations::build_destinations;
+use crate::helper::resolve_target_destinations::resolve_target_destinations;
 
 pub fn collect_target_skills(
     config: &Config,
     base_dir: &Path,
     global: bool,
 ) -> HashMap<AgentName, Vec<(String, PathBuf)>> {
-    build_destinations(config, base_dir, global)
+    resolve_target_destinations(config, base_dir, global)
         .into_iter()
         .map(|(agent, agent_dir)| {
             let skills = fs::read_dir(&agent_dir)

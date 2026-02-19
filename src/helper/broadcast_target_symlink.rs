@@ -17,7 +17,7 @@ pub struct BroadcastErr {
 }
 
 /// source 하나를 여러 대상 디렉토리에 동일 이름으로 심링크 전파한다.
-pub fn broadcast_symlink(
+pub fn broadcast_target_symlink(
     source: &Path,
     dest_dirs: &HashMap<AgentName, PathBuf>,
     dry_run: bool,
@@ -136,7 +136,7 @@ mod tests {
             fs::create_dir_all(d).unwrap();
         }
 
-        let result = broadcast_symlink(&source, &dests, false, false).unwrap();
+        let result = broadcast_target_symlink(&source, &dests, false, false).unwrap();
 
         assert_eq!(result.linked.len(), 2);
         assert!(result.linked.contains(&AgentName::Claude));
@@ -156,7 +156,7 @@ mod tests {
         std::os::unix::fs::symlink(&source, dest_dir.join("skill-a")).unwrap();
 
         let dests = HashMap::from([(AgentName::Claude, dest_dir)]);
-        let result = broadcast_symlink(&source, &dests, false, false).unwrap();
+        let result = broadcast_target_symlink(&source, &dests, false, false).unwrap();
 
         assert!(result.linked.is_empty());
     }
@@ -171,7 +171,7 @@ mod tests {
         fs::create_dir_all(dest_dir.join("skill-a")).unwrap();
 
         let dests = HashMap::from([(AgentName::Claude, dest_dir.clone())]);
-        let err = broadcast_symlink(&source, &dests, false, false).unwrap_err();
+        let err = broadcast_target_symlink(&source, &dests, false, false).unwrap_err();
 
         assert!(err.linked.is_empty());
         assert_eq!(err.conflicts, vec![AgentName::Claude]);
@@ -188,7 +188,7 @@ mod tests {
         fs::create_dir_all(dest_dir.join("skill-a")).unwrap();
 
         let dests = HashMap::from([(AgentName::Claude, dest_dir.clone())]);
-        let result = broadcast_symlink(&source, &dests, false, true).unwrap();
+        let result = broadcast_target_symlink(&source, &dests, false, true).unwrap();
 
         assert_eq!(result.linked, vec![AgentName::Claude]);
         assert!(dest_dir.join("skill-a").is_symlink());
@@ -206,7 +206,7 @@ mod tests {
         fs::write(dest_dir.join("skill-a"), "existing").unwrap();
 
         let dests = HashMap::from([(AgentName::Claude, dest_dir.clone())]);
-        let result = broadcast_symlink(&source, &dests, false, true).unwrap();
+        let result = broadcast_target_symlink(&source, &dests, false, true).unwrap();
 
         assert_eq!(result.linked, vec![AgentName::Claude]);
         assert!(dest_dir.join("skill-a").is_symlink());
@@ -222,7 +222,7 @@ mod tests {
         fs::create_dir_all(&dest_dir).unwrap();
 
         let dests = HashMap::from([(AgentName::Claude, dest_dir.clone())]);
-        let result = broadcast_symlink(&source, &dests, true, false).unwrap();
+        let result = broadcast_target_symlink(&source, &dests, true, false).unwrap();
 
         assert_eq!(result.linked, vec![AgentName::Claude]);
         assert!(!dest_dir.join("skill-a").exists());
@@ -241,7 +241,7 @@ mod tests {
         std::os::unix::fs::symlink(&wrong, dest_dir.join("skill-a")).unwrap();
 
         let dests = HashMap::from([(AgentName::Claude, dest_dir.clone())]);
-        let result = broadcast_symlink(&source, &dests, false, false).unwrap();
+        let result = broadcast_target_symlink(&source, &dests, false, false).unwrap();
 
         assert_eq!(result.linked, vec![AgentName::Claude]);
         assert_eq!(fs::read_link(dest_dir.join("skill-a")).unwrap(), source);
@@ -256,7 +256,7 @@ mod tests {
         let dest_dir = tmp.path().join("deep/nested/agent");
 
         let dests = HashMap::from([(AgentName::Claude, dest_dir.clone())]);
-        let result = broadcast_symlink(&source, &dests, false, false).unwrap();
+        let result = broadcast_target_symlink(&source, &dests, false, false).unwrap();
 
         assert_eq!(result.linked, vec![AgentName::Claude]);
         assert!(dest_dir.join("skill-a").is_symlink());
@@ -279,7 +279,7 @@ mod tests {
             (AgentName::Pi, conflict_dir.clone()),
         ]);
 
-        let err = broadcast_symlink(&source, &dests, false, false).unwrap_err();
+        let err = broadcast_target_symlink(&source, &dests, false, false).unwrap_err();
 
         assert_eq!(err.linked, vec![AgentName::Claude]);
         assert_eq!(err.conflicts, vec![AgentName::Pi]);

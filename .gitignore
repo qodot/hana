@@ -1,2 +1,6 @@
 /target
 target/
+
+# hana sync output (project-specific)
+.agents/
+CLAUDE.md

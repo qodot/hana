@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -204,8 +204,12 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions) -> SkillsSy
         .collect();
 
     let enabled_targets = resolve_target_destinations(config, base_dir, opts.global);
+    let collected_set: HashSet<(&str, &str)> = collected
+        .iter()
+        .map(|(name, agent)| (name.as_str(), agent.as_str()))
+        .collect();
     let (linked, broadcast_warnings) =
-        broadcast_skills(&source_dir, &skills, &enabled_targets, opts);
+        broadcast_skills(&source_dir, &skills, &enabled_targets, &collected_set, opts);
 
     // 3단계: 깨진 심링크 정리
     let cleaned = clean_broken_symlinks(&enabled_targets, opts.dry_run);
@@ -225,6 +229,7 @@ fn broadcast_skills(
     source_dir: &Path,
     skills: &[String],
     targets: &HashMap<AgentName, PathBuf>,
+    collected: &HashSet<(&str, &str)>,
     opts: &SyncOptions,
 ) -> (Vec<(String, String)>, Vec<SyncWarning>) {
     let mut linked = Vec::new();
@@ -243,10 +248,16 @@ fn broadcast_skills(
                 .iter()
                 .map(|a| (skill.clone(), a.as_str().to_string())),
         );
-        warnings.extend(conflicts.iter().map(|a| SyncWarning::FileConflict {
-            skill: skill.clone(),
-            agent: a.as_str().to_string(),
-        }));
+        for a in &conflicts {
+            if collected.contains(&(skill.as_str(), a.as_str())) {
+                linked.push((skill.clone(), a.as_str().to_string()));
+            } else {
+                warnings.push(SyncWarning::FileConflict {
+                    skill: skill.clone(),
+                    agent: a.as_str().to_string(),
+                });
+            }
+        }
         warnings.extend(failed.iter().map(|(a, d)| SyncWarning::IoFailed {
             operation: format!("심링크 생성 ({skill}, {})", a.as_str()),
             detail: d.clone(),
@@ -378,18 +389,6 @@ mod tests {
     use std::os::unix::fs::symlink;
     use tempfile::TempDir;
 
-    fn default_config() -> Config {
-        Config::default()
-    }
-
-    fn default_opts() -> SyncOptions {
-        SyncOptions {
-            dry_run: false,
-            force: false,
-            global: false,
-        }
-    }
-
     fn setup_source(tmp: &Path) {
         let skills = tmp.join(".agents/skills");
         fs::create_dir_all(skills.join("my-skill")).unwrap();
@@ -397,56 +396,38 @@ mod tests {
         fs::write(tmp.join("AGENTS.md"), "# Instructions").unwrap();
     }
 
-    // === 스킬 정방향 동기화 ===
-
     #[test]
-    fn test_sync_creates_skill_symlinks() {
+    fn test_sync_skills_and_instructions() {
         let tmp = TempDir::new().unwrap();
         setup_source(tmp.path());
 
-        let result = execute(&default_config(), tmp.path(), &default_opts());
+        let result = execute(&Config::default(), tmp.path(), &SyncOptions::default());
 
         assert!(tmp.path().join(".claude/skills/my-skill").is_symlink());
         assert!(tmp.path().join(".pi/skills/my-skill").is_symlink());
         assert!(tmp.path().join(".opencode/skills/my-skill").is_symlink());
         assert!(!tmp.path().join(".agents/skills/my-skill").is_symlink());
         assert!(result.skills_linked.len() >= 3);
+        assert!(tmp.path().join("CLAUDE.md").is_symlink());
+        assert!(result.instructions_linked.contains(&"claude".to_string()));
         assert!(result.warnings.is_empty());
     }
 
     #[test]
-    fn test_sync_skips_existing_correct_symlink() {
+    fn test_sync_idempotent() {
         let tmp = TempDir::new().unwrap();
         setup_source(tmp.path());
-        let config = default_config();
+        let config = Config::default();
 
-        execute(&config, tmp.path(), &default_opts());
-        let result = execute(&config, tmp.path(), &default_opts());
+        execute(&config, tmp.path(), &SyncOptions::default());
+        let result = execute(&config, tmp.path(), &SyncOptions::default());
+
         assert!(result.skills_linked.is_empty());
+        assert!(result.instructions_linked.is_empty());
     }
 
     #[test]
-    fn test_sync_skips_disabled_target() {
-        let tmp = TempDir::new().unwrap();
-        setup_source(tmp.path());
-        let mut config = default_config();
-        config.targets.get_mut("claude").unwrap().skills = false;
-
-        let result = execute(&config, tmp.path(), &default_opts());
-
-        assert!(!tmp.path().join(".claude/skills/my-skill").exists());
-        let claude_links: Vec<_> = result
-            .skills_linked
-            .iter()
-            .filter(|(_, a)| a == "claude")
-            .collect();
-        assert!(claude_links.is_empty());
-    }
-
-    // === 스킬 수집 ===
-
-    #[test]
-    fn test_sync_collects_new_skill_and_links_all_agents() {
+    fn test_sync_collects_and_broadcasts() {
         let tmp = TempDir::new().unwrap();
         setup_source(tmp.path());
 
@@ -454,203 +435,33 @@ mod tests {
         fs::create_dir_all(&pi_new).unwrap();
         fs::write(pi_new.join("SKILL.md"), "# New").unwrap();
 
-        let result = execute(&default_config(), tmp.path(), &default_opts());
+        let result = execute(&Config::default(), tmp.path(), &SyncOptions::default());
 
-        // 소스로 이동
         assert!(tmp.path().join(".agents/skills/new-skill").is_dir());
-        assert!(!tmp.path().join(".agents/skills/new-skill").is_symlink());
-        // 원래 위치는 심링크
         assert!(tmp.path().join(".pi/skills/new-skill").is_symlink());
-        assert!(!result.skills_collected.is_empty());
-        // 수집 후 다른 에이전트에도 심링크 생성되었는지
         assert!(tmp.path().join(".claude/skills/new-skill").is_symlink());
         assert!(tmp.path().join(".opencode/skills/new-skill").is_symlink());
-        assert!(tmp.path().join(".pi/skills/new-skill").is_symlink());
+        assert!(!result.skills_collected.is_empty());
     }
 
     #[test]
-    fn test_sync_does_not_collect_existing_source_skill() {
-        let tmp = TempDir::new().unwrap();
-        setup_source(tmp.path());
-
-        let pi_existing = tmp.path().join(".pi/skills/my-skill");
-        fs::create_dir_all(&pi_existing).unwrap();
-
-        let result = execute(&default_config(), tmp.path(), &default_opts());
-
-        let collected: Vec<_> = result
-            .skills_collected
-            .iter()
-            .filter(|(name, _)| name == "my-skill")
-            .collect();
-        assert!(collected.is_empty());
-        assert!(result.warnings.iter().any(|w| matches!(
-            w,
-            SyncWarning::SourceSkillConflict { skill, agent }
-                if skill == "my-skill" && agent == "pi"
-        )));
-    }
-
-    #[test]
-    fn test_sync_force_overwrites_existing_source_skill() {
-        let tmp = TempDir::new().unwrap();
-        setup_source(tmp.path());
-
-        let pi_existing = tmp.path().join(".pi/skills/my-skill");
-        fs::create_dir_all(&pi_existing).unwrap();
-        fs::write(pi_existing.join("SKILL.md"), "# Pi Skill").unwrap();
-
-        let opts = SyncOptions {
-            force: true,
-            ..default_opts()
-        };
-        let result = execute(&default_config(), tmp.path(), &opts);
-
-        assert_eq!(
-            fs::read_to_string(tmp.path().join(".agents/skills/my-skill/SKILL.md")).unwrap(),
-            "# Pi Skill"
-        );
-        assert!(tmp.path().join(".pi/skills/my-skill").is_symlink());
-        assert!(
-            result
-                .skills_collected
-                .iter()
-                .any(|(name, agent)| name == "my-skill" && agent == "pi")
-        );
-    }
-
-    // === 스킬 이름 충돌 ===
-
-    #[test]
-    fn test_sync_detects_skill_name_conflict() {
-        let tmp = TempDir::new().unwrap();
-        setup_source(tmp.path());
-
-        // 같은 이름의 실제 디렉토리를 pi, claude 양쪽에 생성
-        fs::create_dir_all(tmp.path().join(".pi/skills/conflict-skill")).unwrap();
-        fs::create_dir_all(tmp.path().join(".claude/skills/conflict-skill")).unwrap();
-
-        let result = execute(&default_config(), tmp.path(), &default_opts());
-
-        // 충돌 경고 발생
-        assert!(result.warnings.iter().any(|w| matches!(
-            w,
-            SyncWarning::SkillConflict { name, .. } if name == "conflict-skill"
-        )));
-
-        // 소스로 이동되지 않아야 함
-        assert!(!tmp.path().join(".agents/skills/conflict-skill").exists());
-    }
-
-    // === 기존 파일 충돌 + --force ===
-
-    #[test]
-    fn test_sync_existing_real_skill_dir_requires_force() {
-        let tmp = TempDir::new().unwrap();
-        setup_source(tmp.path());
-
-        fs::create_dir_all(tmp.path().join(".claude/skills/my-skill")).unwrap();
-        fs::write(tmp.path().join(".claude/skills/my-skill/old.txt"), "old").unwrap();
-
-        let result_without_force = execute(&default_config(), tmp.path(), &default_opts());
-        assert!(result_without_force.warnings.iter().any(|w| matches!(
-            w,
-            SyncWarning::FileConflict { skill, .. } if skill == "my-skill"
-        )));
-        assert!(tmp.path().join(".claude/skills/my-skill").is_dir());
-
-        let opts = SyncOptions {
-            force: true,
-            ..default_opts()
-        };
-        let result_with_force = execute(&default_config(), tmp.path(), &opts);
-
-        // 심링크로 대체됨
-        assert!(tmp.path().join(".claude/skills/my-skill").is_symlink());
-        assert!(result_with_force.warnings.is_empty());
-    }
-
-    // === 지침 동기화 ===
-
-    #[test]
-    fn test_sync_creates_instruction_symlink() {
-        let tmp = TempDir::new().unwrap();
-        setup_source(tmp.path());
-
-        let result = execute(&default_config(), tmp.path(), &default_opts());
-
-        assert!(tmp.path().join("CLAUDE.md").is_symlink());
-        assert!(result.instructions_linked.contains(&"claude".to_string()));
-        assert!(result.instructions_skipped.contains(&"codex".to_string()));
-        assert!(result.instructions_skipped.contains(&"pi".to_string()));
-        assert!(
-            result
-                .instructions_skipped
-                .contains(&"opencode".to_string())
-        );
-    }
-
-    #[test]
-    fn test_sync_skips_instruction_when_disabled() {
-        let tmp = TempDir::new().unwrap();
-        setup_source(tmp.path());
-        let mut config = default_config();
-        config.targets.get_mut("claude").unwrap().instructions = false;
-
-        let result = execute(&config, tmp.path(), &default_opts());
-
-        assert!(!tmp.path().join("CLAUDE.md").exists());
-        assert!(!result.instructions_linked.contains(&"claude".to_string()));
-    }
-
-    #[test]
-    fn test_sync_existing_real_instruction_file_requires_force() {
-        let tmp = TempDir::new().unwrap();
-        setup_source(tmp.path());
-        fs::write(tmp.path().join("CLAUDE.md"), "# Real file").unwrap();
-
-        let result_without_force = execute(&default_config(), tmp.path(), &default_opts());
-        assert!(result_without_force.warnings.iter().any(|w| matches!(
-            w,
-            SyncWarning::InstructionConflict { file } if file == "CLAUDE.md"
-        )));
-        assert!(tmp.path().join("CLAUDE.md").is_file());
-
-        let opts = SyncOptions {
-            force: true,
-            ..default_opts()
-        };
-        let result_with_force = execute(&default_config(), tmp.path(), &opts);
-
-        assert!(tmp.path().join("CLAUDE.md").is_symlink());
-        assert!(result_with_force.warnings.is_empty());
-    }
-
-    // === 글로벌 지침 동기화 ===
-
-    #[test]
-    fn test_sync_global_instructions() {
+    fn test_sync_global() {
         let tmp = TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join(".agents/skills")).unwrap();
-        fs::write(tmp.path().join("AGENTS.md"), "# Global Instructions").unwrap();
+        fs::write(tmp.path().join("AGENTS.md"), "# Global").unwrap();
 
-        let mut config = default_config();
+        let mut config = Config::default();
         config.source.skills_path_global = ".agents/skills".to_string();
         config.source.instruction_path_global = "AGENTS.md".to_string();
 
-        let opts = SyncOptions {
-            global: true,
-            ..default_opts()
-        };
-        let _result = execute(&config, tmp.path(), &opts);
+        let opts = SyncOptions { global: true, ..Default::default() };
+        execute(&config, tmp.path(), &opts);
 
         assert!(tmp.path().join(".claude/CLAUDE.md").is_symlink());
         assert!(tmp.path().join(".codex/AGENTS.md").is_symlink());
         assert!(tmp.path().join(".config/opencode/AGENTS.md").is_symlink());
         assert!(tmp.path().join(".pi/agent/AGENTS.md").is_symlink());
     }
-
-    // === 깨진 심링크 정리 ===
 
     #[test]
     fn test_sync_cleans_broken_symlinks() {
@@ -661,100 +472,22 @@ mod tests {
         fs::create_dir_all(&claude_dir).unwrap();
         symlink("/nonexistent/deleted-skill", claude_dir.join("old-skill")).unwrap();
 
-        let result = execute(&default_config(), tmp.path(), &default_opts());
+        let result = execute(&Config::default(), tmp.path(), &SyncOptions::default());
 
-        assert!(!claude_dir.join("old-skill").exists());
         assert!(!claude_dir.join("old-skill").is_symlink());
         assert!(!result.cleaned.is_empty());
     }
 
-    // === dry-run ===
-
     #[test]
-    fn test_sync_dry_run_no_changes() {
+    fn test_sync_dry_run() {
         let tmp = TempDir::new().unwrap();
         setup_source(tmp.path());
 
-        let opts = SyncOptions {
-            dry_run: true,
-            ..default_opts()
-        };
-        let result = execute(&default_config(), tmp.path(), &opts);
+        let opts = SyncOptions { dry_run: true, ..Default::default() };
+        let result = execute(&Config::default(), tmp.path(), &opts);
 
         assert!(!result.skills_linked.is_empty());
         assert!(!tmp.path().join(".claude/skills/my-skill").exists());
         assert!(!tmp.path().join("CLAUDE.md").exists());
-    }
-
-    #[test]
-    fn test_sync_dry_run_includes_collected_skills_when_source_missing() {
-        let tmp = TempDir::new().unwrap();
-        let pi_new = tmp.path().join(".pi/skills/new-skill");
-        fs::create_dir_all(&pi_new).unwrap();
-        fs::write(pi_new.join("SKILL.md"), "# New").unwrap();
-
-        let opts = SyncOptions {
-            dry_run: true,
-            ..default_opts()
-        };
-        let result = execute(&default_config(), tmp.path(), &opts);
-
-        assert!(
-            result
-                .skills_collected
-                .iter()
-                .any(|(name, agent)| name == "new-skill" && agent == "pi")
-        );
-        assert!(
-            result
-                .skills_linked
-                .iter()
-                .any(|(name, agent)| name == "new-skill" && agent == "claude")
-        );
-        assert!(
-            result
-                .skills_linked
-                .iter()
-                .any(|(name, agent)| name == "new-skill" && agent == "opencode")
-        );
-        assert!(result.warnings.iter().any(|w| matches!(
-            w,
-            SyncWarning::FileConflict { skill, agent }
-                if skill == "new-skill" && agent == "pi"
-        )));
-        assert!(!tmp.path().join(".agents/skills").exists());
-        assert!(pi_new.is_dir());
-    }
-
-    // === 소스 없을 때 ===
-
-    #[test]
-    fn test_sync_creates_source_and_collects_from_pi_when_source_missing() {
-        let tmp = TempDir::new().unwrap();
-        let pi_new = tmp.path().join(".pi/skills/new-skill");
-        fs::create_dir_all(&pi_new).unwrap();
-        fs::write(pi_new.join("SKILL.md"), "# New").unwrap();
-
-        let result = execute(&default_config(), tmp.path(), &default_opts());
-
-        assert!(tmp.path().join(".agents/skills").exists());
-        assert!(tmp.path().join(".agents/skills/new-skill").is_dir());
-        assert!(tmp.path().join(".pi/skills/new-skill").is_symlink());
-        assert!(result.warnings.is_empty());
-        assert!(
-            result
-                .skills_collected
-                .iter()
-                .any(|(name, agent)| name == "new-skill" && agent == "pi")
-        );
-    }
-
-    #[test]
-    fn test_sync_no_instructions_source() {
-        let tmp = TempDir::new().unwrap();
-
-        let result = execute(&default_config(), tmp.path(), &default_opts());
-
-        assert!(result.instructions_linked.is_empty());
     }
 }

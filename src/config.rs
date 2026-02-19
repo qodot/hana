@@ -5,12 +5,12 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub enum ConfigError {
-    /// 설정 파일을 읽을 수 없음
+    /// Cannot read config file
     ReadFile {
         path: PathBuf,
         source: std::io::Error,
     },
-    /// TOML 파싱 실패
+    /// TOML parse error
     Parse { message: String },
 }
 
@@ -20,11 +20,11 @@ impl std::fmt::Display for ConfigError {
             Self::ReadFile { path, source } => {
                 write!(
                     f,
-                    "설정 파일을 읽을 수 없습니다 ({}): {source}",
+                    "cannot read config file ({}): {source}",
                     path.display()
                 )
             }
-            Self::Parse { message } => write!(f, "TOML 파싱 실패: {message}"),
+            Self::Parse { message } => write!(f, "TOML parse error: {message}"),
         }
     }
 }

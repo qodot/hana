@@ -35,15 +35,15 @@ pub struct SyncOk {
 
 #[derive(Debug)]
 pub enum SyncWarning {
-    /// 스킬 이름 충돌: 여러 에이전트에서 동일 이름 발견
+    /// Skill name conflict: same name found in multiple agents
     SkillConflict { name: String, agents: Vec<String> },
-    /// 소스에 동일 이름 스킬이 이미 존재 (--force로 덮어쓰기 가능)
+    /// Source already has a skill with the same name (use --force to overwrite)
     SourceSkillConflict { skill: String, agent: String },
-    /// 기존 파일/디렉토리 충돌 (--force 필요)
+    /// Existing file/directory conflict (--force required)
     FileConflict { skill: String, agent: String },
-    /// 지침 파일 충돌 (--force 필요)
+    /// Instruction file conflict (--force required)
     InstructionConflict { file: String },
-    /// 파일시스템 작업 실패
+    /// Filesystem operation failed
     IoFailed { operation: String, detail: String },
 }
 
@@ -51,24 +51,28 @@ impl std::fmt::Display for SyncWarning {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::SkillConflict { name, agents } => {
-                write!(f, "스킬 이름 충돌: '{name}' — {}", agents.join(", "))
+                write!(
+                    f,
+                    "skill name conflict: '{name}' found in {}",
+                    agents.join(", ")
+                )
             }
             Self::SourceSkillConflict { skill, agent } => {
                 write!(
                     f,
-                    "수집 건너뜀: {skill} ({agent}) — 소스에 동일 이름 스킬이 이미 존재합니다. --force로 덮어쓸 수 있습니다."
+                    "skipped: {skill} ({agent}) — source already has a skill with the same name. Use --force to overwrite."
                 )
             }
             Self::FileConflict { skill, agent } => {
                 write!(
                     f,
-                    "충돌: {skill} ({agent}) 에 실제 파일/디렉토리 존재. --force로 덮어쓰세요."
+                    "conflict: {skill} ({agent}) has a real file/directory. Use --force to overwrite."
                 )
             }
             Self::InstructionConflict { file } => {
                 write!(
                     f,
-                    "{file} 가 이미 존재합니다 (심링크가 아님). --force로 덮어쓰세요."
+                    "{file} already exists (not a symlink). Use --force to overwrite."
                 )
             }
             Self::IoFailed { operation, detail } => {
@@ -126,7 +130,7 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions) -> SkillsSy
         if let Err(e) = fs::create_dir_all(&source_dir) {
             return SkillsSyncResult {
                 warnings: vec![SyncWarning::IoFailed {
-                    operation: format!("소스 디렉토리 생성 ({})", source_dir.display()),
+                    operation: format!("create source directory ({})", source_dir.display()),
                     detail: e.to_string(),
                 }],
                 ..Default::default()
@@ -134,7 +138,7 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions) -> SkillsSy
         }
     }
 
-    // 1단계: source에 모든 스킬 수집
+    // Phase 1: Collect skills from agent paths into source
     let collected_by_agent = collect_target_skills(config, base_dir, opts.global);
     let move_result =
         move_target_skills(&collected_by_agent, &source_dir, opts.force, opts.dry_run);
@@ -147,7 +151,7 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions) -> SkillsSy
         .map(|t| (t.skill.clone(), t.agent.as_str().to_string()))
         .collect();
 
-    // 2단계: target에 동기화 (심링크 생성)
+    // Phase 2: Broadcast source skills to agent paths (create symlinks)
     let source_skills = match collect_source_skills(&source_dir) {
         Ok(skills) => skills,
         Err(warning) => {
@@ -159,7 +163,7 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions) -> SkillsSy
         }
     };
 
-    // dry-run에서는 실제 이동이 없으므로, 이번 실행에서 수집 예정인 스킬을 추가로 포함해 동기화 대상을 계산한다.
+    // In dry-run, actual moves don't happen — include pending collected skills for broadcast calculation
     let skills: Vec<String> = source_skills
         .into_iter()
         .chain(if opts.dry_run {
@@ -180,7 +184,7 @@ fn sync_skills(config: &Config, base_dir: &Path, opts: &SyncOptions) -> SkillsSy
     let (linked, broadcast_warnings) =
         broadcast_skills(&source_dir, &skills, &enabled_targets, &collected_set, opts);
 
-    // 3단계: 깨진 심링크 정리
+    // Phase 3: Clean up broken symlinks
     let cleaned = clean_broken_symlinks(&enabled_targets, opts.dry_run);
 
     SkillsSyncResult {
@@ -228,7 +232,7 @@ fn broadcast_skills(
             }
         }
         warnings.extend(failed.iter().map(|(a, d)| SyncWarning::IoFailed {
-            operation: format!("심링크 생성 ({skill}, {})", a.as_str()),
+            operation: format!("create symlink ({skill}, {})", a.as_str()),
             detail: d.clone(),
         }));
     }
@@ -268,7 +272,7 @@ fn sync_instructions(
 ) -> InstructionsSyncResult {
     let source_path = config.resolve_source_instruction_path(base_dir, opts.global);
 
-    // 소스가 없으면 에이전트별 지침 파일에서 수집 시도
+    // If source doesn't exist, try collecting from agent-specific instruction files
     let collected = if !source_path.exists() {
         match collect_instruction(config, base_dir, &source_path, opts) {
             Some(collected) => Some(collected),
@@ -281,14 +285,14 @@ fn sync_instructions(
     let dest_map =
         resolve_target_destinations(config, base_dir, opts.global, TargetFeature::Instructions);
 
-    // dest_map에 없지만 enabled인 에이전트 → source와 동일 경로를 직접 읽는 에이전트(skipped)
+    // Agents not in dest_map but enabled → they read the source path directly (skipped)
     let skipped: Vec<String> = config
         .enabled_targets(TargetFeature::Instructions)
         .filter(|agent| !dest_map.contains_key(agent))
         .map(|agent| agent.as_str().to_string())
         .collect();
 
-    // 수집된 에이전트는 이미 심링크 처리됨 (dry-run에서는 아직 실제 파일이므로 제외해야 거짓 충돌 방지)
+    // Skip the collected agent — already symlinked (in dry-run, file hasn't moved so skip to avoid false conflict)
     let collected_agent: Option<&str> = collected.as_ref().map(|(_, agent)| agent.as_str());
 
     let mut linked = Vec::new();
@@ -313,7 +317,7 @@ fn sync_instructions(
             }
             LinkOutcome::Failed(detail) => {
                 warnings.push(SyncWarning::IoFailed {
-                    operation: format!("지침 심링크 ({})", display_name),
+                    operation: format!("instruction symlink ({})", display_name),
                     detail,
                 });
             }
@@ -328,8 +332,9 @@ fn sync_instructions(
     }
 }
 
-/// 소스 지침 파일이 없을 때, 에이전트별 지침 파일(CLAUDE.md 등)에서 수집한다.
-/// 심링크가 아닌 실제 파일을 찾아 소스 경로로 이동하고 심링크를 생성한다.
+/// When the source instruction file is missing, find an agent-specific instruction file
+/// (e.g. CLAUDE.md) that is a real file (not a symlink), move it to the source path,
+/// and create a symlink in its place.
 fn collect_instruction(
     config: &Config,
     base_dir: &Path,
@@ -339,7 +344,7 @@ fn collect_instruction(
     let dest_map =
         resolve_target_destinations(config, base_dir, opts.global, TargetFeature::Instructions);
 
-    // 심링크가 아닌 실제 파일이 있는 에이전트를 찾는다
+    // Find the first agent with a real instruction file (not a symlink)
     let candidate = AgentName::iter()
         .filter(|agent| dest_map.contains_key(agent))
         .find_map(|agent| {
@@ -356,16 +361,15 @@ fn collect_instruction(
     if !opts.dry_run {
         if let Err(e) = fs::rename(&agent_path, source_path) {
             eprintln!(
-                "  ⚠️  지침 수집 실패 ({} → {}): {e}",
+                "  ⚠ failed to collect instruction ({} → {}): {e}",
                 agent_path.display(),
                 source_path.display()
             );
             return None;
         }
-        // 원래 위치에 심링크 생성
         if let Err(e) = std::os::unix::fs::symlink(source_path, &agent_path) {
             eprintln!(
-                "  ⚠️  심링크 생성 실패 ({}): {e}",
+                "  ⚠ failed to create symlink ({}): {e}",
                 agent_path.display()
             );
         }
@@ -504,25 +508,21 @@ mod tests {
     #[test]
     fn test_sync_collects_instruction_from_claude_md() {
         let tmp = TempDir::new().unwrap();
-        // AGENTS.md 없이 CLAUDE.md만 존재
         fs::write(tmp.path().join("CLAUDE.md"), "# Claude Instructions").unwrap();
 
         let result = run(&Config::default(), tmp.path(), &SyncOptions::default());
 
-        // CLAUDE.md가 AGENTS.md로 이동됨
         assert!(tmp.path().join("AGENTS.md").is_file());
         assert!(!tmp.path().join("AGENTS.md").is_symlink());
         assert_eq!(
             fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap(),
             "# Claude Instructions"
         );
-        // CLAUDE.md는 심링크로 변환됨
         assert!(tmp.path().join("CLAUDE.md").is_symlink());
         assert_eq!(
             fs::read_link(tmp.path().join("CLAUDE.md")).unwrap(),
             tmp.path().join("AGENTS.md")
         );
-        // 수집 결과 확인
         assert!(result.instructions_collected.is_some());
         let (file, agent) = result.instructions_collected.unwrap();
         assert_eq!(file, "CLAUDE.md");
@@ -537,13 +537,10 @@ mod tests {
         let opts = SyncOptions { dry_run: true, ..Default::default() };
         let result = run(&Config::default(), tmp.path(), &opts);
 
-        // dry-run이므로 파일 이동 없음
         assert!(!tmp.path().join("AGENTS.md").exists());
         assert!(tmp.path().join("CLAUDE.md").is_file());
         assert!(!tmp.path().join("CLAUDE.md").is_symlink());
-        // 수집 계획은 표시됨
         assert!(result.instructions_collected.is_some());
-        // 수집 대상에 대한 거짓 충돌 경고가 없어야 함
         assert!(!result.warnings.iter().any(|w| matches!(
             w,
             SyncWarning::InstructionConflict { file } if file == "CLAUDE.md"
@@ -553,16 +550,13 @@ mod tests {
     #[test]
     fn test_sync_no_collect_when_agents_md_exists() {
         let tmp = TempDir::new().unwrap();
-        // AGENTS.md와 CLAUDE.md 모두 존재 (CLAUDE.md는 실제 파일)
         fs::write(tmp.path().join("AGENTS.md"), "# Source").unwrap();
         fs::write(tmp.path().join("CLAUDE.md"), "# Claude").unwrap();
 
         let opts = SyncOptions { force: true, ..Default::default() };
         let result = run(&Config::default(), tmp.path(), &opts);
 
-        // AGENTS.md가 이미 있으므로 수집하지 않음
         assert!(result.instructions_collected.is_none());
-        // AGENTS.md 내용은 변경되지 않음
         assert_eq!(
             fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap(),
             "# Source"
@@ -572,7 +566,6 @@ mod tests {
     #[test]
     fn test_sync_no_instruction_when_nothing_exists() {
         let tmp = TempDir::new().unwrap();
-        // 아무 지침 파일도 없음
 
         let result = run(&Config::default(), tmp.path(), &SyncOptions::default());
 

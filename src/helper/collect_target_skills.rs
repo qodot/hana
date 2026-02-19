@@ -57,8 +57,8 @@ mod tests {
 
         let result = collect_target_skills(&config, tmp.path(), false);
 
-        assert!(!result.contains_key(&AgentName::Codex)); // source와 동일한 경로는 제외
-        assert!(!result.contains_key(&AgentName::Pi)); // 대상 비활성화
+        assert!(!result.contains_key(&AgentName::Codex)); // same path as source
+        assert!(!result.contains_key(&AgentName::Pi)); // disabled
         let claude_skills = result.get(&AgentName::Claude).unwrap();
         assert_eq!(claude_skills.len(), 1);
         assert_eq!(claude_skills[0].0, "real-skill");
@@ -91,7 +91,7 @@ mod tests {
 
         let result = collect_target_skills(&config, tmp.path(), false);
 
-        assert!(!result.contains_key(&AgentName::Pi)); // source와 동일 경로는 제외
+        assert!(!result.contains_key(&AgentName::Pi)); // same path as source
         let claude_skills = result.get(&AgentName::Claude).unwrap();
         assert_eq!(claude_skills.len(), 1);
         assert_eq!(claude_skills[0].0, "claude-skill");

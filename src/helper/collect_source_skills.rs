@@ -14,7 +14,7 @@ pub fn collect_source_skills(source_dir: &Path) -> Result<Vec<String>, SyncWarni
             .map(|e| e.file_name().to_string_lossy().to_string())
             .collect()),
         Err(e) => Err(SyncWarning::IoFailed {
-            operation: format!("소스 스킬 목록 읽기 ({})", source_dir.display()),
+            operation: format!("read source skills ({})", source_dir.display()),
             detail: e.to_string(),
         }),
     }

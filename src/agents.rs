@@ -1,5 +1,5 @@
-/// 에이전트별 스킬 경로를 수집한다.
-/// 반환: (agent, path) 목록. 소스와 동일한 경로는 제외.
+/// Collect skill paths for each agent.
+/// Returns: (agent, path) list. Excludes paths identical to source.
 pub fn collect_skills(global: bool, source: &str) -> Vec<(&'static str, &'static str)> {
     let paths: &[(&str, &str)] = if global {
         &[
@@ -24,11 +24,11 @@ pub fn collect_skills(global: bool, source: &str) -> Vec<(&'static str, &'static
         .collect()
 }
 
-/// 에이전트별 지침 파일 경로를 수집한다.
-/// 반환: (agent, path) 목록. None인 에이전트는 소스를 직접 읽으므로 포함하지 않는다.
+/// Collect instruction file paths for each agent.
+/// Returns: (agent, path) list. None means the agent reads the source directly.
 pub fn collect_instructions(global: bool) -> Vec<(&'static str, Option<&'static str>)> {
     if global {
-        // 글로벌: 모든 에이전트에 심링크 필요
+        // Global: all agents need symlinks
         vec![
             ("claude", Some(".claude/CLAUDE.md")),
             ("codex", Some(".codex/AGENTS.md")),
@@ -36,7 +36,7 @@ pub fn collect_instructions(global: bool) -> Vec<(&'static str, Option<&'static 
             ("opencode", Some(".config/opencode/AGENTS.md")),
         ]
     } else {
-        // 프로젝트: claude만 심링크, 나머지는 AGENTS.md 직접 읽음
+        // Project: only claude needs a symlink, others read AGENTS.md directly
         vec![
             ("claude", Some("CLAUDE.md")),
             ("codex", None),
@@ -57,7 +57,7 @@ mod tests {
         assert!(agents.contains(&"claude"));
         assert!(agents.contains(&"pi"));
         assert!(agents.contains(&"opencode"));
-        assert!(!agents.contains(&"codex")); // 소스와 동일
+        assert!(!agents.contains(&"codex"));
     }
 
     #[test]
@@ -75,13 +75,12 @@ mod tests {
         let claude = instructions.iter().find(|(a, _)| *a == "claude").unwrap();
         assert_eq!(claude.1, Some("CLAUDE.md"));
         let codex = instructions.iter().find(|(a, _)| *a == "codex").unwrap();
-        assert_eq!(codex.1, None); // 직접 읽음
+        assert_eq!(codex.1, None);
     }
 
     #[test]
     fn test_collect_instructions_global() {
         let instructions = collect_instructions(true);
-        // 글로벌에서는 모두 Some
         for (_, path) in &instructions {
             assert!(path.is_some());
         }

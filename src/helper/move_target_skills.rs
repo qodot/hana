@@ -82,7 +82,7 @@ pub fn move_target_skills(
                     };
                     if let Err(e) = remove_result {
                         warnings.push(SyncWarning::IoFailed {
-                            operation: format!("기존 소스 스킬 제거 ({name})"),
+                            operation: format!("remove existing source skill ({name})"),
                             detail: e.to_string(),
                         });
                         continue;
@@ -100,7 +100,7 @@ pub fn move_target_skills(
         if !dry_run {
             if let Err(e) = fs::rename(path, &dest) {
                 warnings.push(SyncWarning::IoFailed {
-                    operation: format!("스킬 수집 ({name}, {agent})"),
+                    operation: format!("collect skill ({name}, {agent})"),
                     detail: e.to_string(),
                 });
                 continue;

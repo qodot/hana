@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use crate::config::{AgentName, Config, TargetFeature};
 
-/// 설정(`target.*`)을 기준으로 feature(Skills 또는 Instructions)를 전파할 대상 경로 맵을 만든다.
-/// 반환: agent -> destination_path
+/// Build a map of target destinations for a given feature (Skills or Instructions).
+/// Returns: agent -> destination_path
 pub fn resolve_target_destinations(
     config: &Config,
     base_dir: &Path,
@@ -55,7 +55,7 @@ mod tests {
         assert!(agents.contains(&AgentName::Claude));
         assert!(agents.contains(&AgentName::Opencode));
         assert!(!agents.contains(&AgentName::Pi));
-        assert!(!agents.contains(&AgentName::Codex)); // source와 동일 경로이므로 제외
+        assert!(!agents.contains(&AgentName::Codex)); // same path as source
     }
 
     #[test]
@@ -87,7 +87,7 @@ mod tests {
 
         let agents: Vec<AgentName> = destinations.keys().copied().collect();
         assert!(agents.contains(&AgentName::Claude));
-        assert!(!agents.contains(&AgentName::Pi)); // source와 동일 경로이므로 제외
+        assert!(!agents.contains(&AgentName::Pi)); // same path as source
     }
 
     #[test]
@@ -98,13 +98,13 @@ mod tests {
         let destinations =
             resolve_target_destinations(&config, tmp.path(), false, TargetFeature::Instructions);
 
-        // claude: CLAUDE.md != AGENTS.md → 포함
+        // claude: CLAUDE.md != AGENTS.md → included
         assert!(destinations.contains_key(&AgentName::Claude));
-        // codex: AGENTS.md == AGENTS.md → 제외 (source와 동일)
+        // codex: AGENTS.md == AGENTS.md → excluded (same as source)
         assert!(!destinations.contains_key(&AgentName::Codex));
-        // pi: AGENTS.md == AGENTS.md → 제외
+        // pi: AGENTS.md == AGENTS.md → excluded
         assert!(!destinations.contains_key(&AgentName::Pi));
-        // opencode: AGENTS.md == AGENTS.md → 제외
+        // opencode: AGENTS.md == AGENTS.md → excluded
         assert!(!destinations.contains_key(&AgentName::Opencode));
     }
 
@@ -116,7 +116,7 @@ mod tests {
         let destinations =
             resolve_target_destinations(&config, tmp.path(), true, TargetFeature::Instructions);
 
-        // global에서는 각 에이전트마다 다른 경로를 사용하므로 모두 포함
+        // In global mode, each agent has a unique path — all included
         assert!(destinations.contains_key(&AgentName::Claude));
         assert!(destinations.contains_key(&AgentName::Codex));
         assert!(destinations.contains_key(&AgentName::Pi));

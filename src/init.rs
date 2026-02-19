@@ -13,9 +13,9 @@ pub struct InitOptions {
 
 #[derive(Debug)]
 pub enum InitOk {
-    /// 설정 파일 생성 완료
+    /// Config file created
     Created { path: PathBuf },
-    /// dry-run: 내용만 출력
+    /// Dry-run: show content only
     DryRun { path: String, content: String },
 }
 
@@ -23,14 +23,14 @@ pub enum InitOk {
 
 #[derive(Debug)]
 pub enum InitError {
-    /// 설정 파일이 이미 존재 (--force 없이)
+    /// Config file already exists (without --force)
     AlreadyExists { path: PathBuf },
-    /// 디렉토리 생성 실패
+    /// Failed to create directory
     CreateDir {
         path: PathBuf,
         source: std::io::Error,
     },
-    /// 파일 쓰기 실패
+    /// Failed to write file
     WriteFile {
         path: PathBuf,
         source: std::io::Error,
@@ -43,15 +43,19 @@ impl std::fmt::Display for InitError {
             Self::AlreadyExists { path } => {
                 write!(
                     f,
-                    "이미 존재합니다: {}\n   덮어쓰려면 --force 옵션을 사용하세요.",
+                    "already exists: {}\n  use --force to overwrite.",
                     path.display()
                 )
             }
             Self::CreateDir { path, source } => {
-                write!(f, "디렉토리 생성 실패 ({}): {source}", path.display())
+                write!(
+                    f,
+                    "failed to create directory ({}): {source}",
+                    path.display()
+                )
             }
             Self::WriteFile { path, source } => {
-                write!(f, "파일 생성 실패 ({}): {source}", path.display())
+                write!(f, "failed to write file ({}): {source}", path.display())
             }
         }
     }
@@ -99,7 +103,7 @@ pub fn run(opts: &InitOptions, base_dir: &Path) -> Result<InitOk, InitError> {
 
 // --- Internal ---
 
-pub const PROJECT_CONFIG: &str = r#"# hana - AI 코딩 에이전트 동기화 설정
+pub const PROJECT_CONFIG: &str = r#"# hana - AI coding agent sync config
 # https://github.com/qodot/hana
 
 [source]
@@ -141,7 +145,7 @@ instruction_path = "AGENTS.md"
 instruction_path_global = ".config/opencode/AGENTS.md"
 "#;
 
-pub const GLOBAL_CONFIG: &str = r#"# hana - AI 코딩 에이전트 글로벌 동기화 설정
+pub const GLOBAL_CONFIG: &str = r#"# hana - AI coding agent global sync config
 # https://github.com/qodot/hana
 
 [source]

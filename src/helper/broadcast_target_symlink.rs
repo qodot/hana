@@ -16,7 +16,7 @@ pub struct BroadcastErr {
     pub failed: Vec<(AgentName, String)>,
 }
 
-/// source 하나를 여러 대상 디렉토리에 동일 이름으로 심링크 전파한다.
+/// Broadcast a single source as symlinks to multiple target directories.
 pub fn broadcast_target_symlink(
     source: &Path,
     dest_dirs: &HashMap<AgentName, PathBuf>,
@@ -32,7 +32,7 @@ pub fn broadcast_target_symlink(
             dest_dirs
                 .keys()
                 .copied()
-                .map(|agent| (agent, "소스 이름을 확인할 수 없습니다.".to_string())),
+                .map(|agent| (agent, "cannot determine source name".to_string())),
         );
         failed.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
         return Err(BroadcastErr {
@@ -75,7 +75,7 @@ pub enum LinkOutcome {
 }
 
 pub fn link_one(source: &Path, dest: &Path, dry_run: bool, force: bool) -> LinkOutcome {
-    // 이미 올바른 심링크면 스킵
+    // Already a valid symlink — skip
     if dest.is_symlink() {
         if let Ok(target) = fs::read_link(dest) {
             if target == source {
@@ -84,7 +84,7 @@ pub fn link_one(source: &Path, dest: &Path, dry_run: bool, force: bool) -> LinkO
         }
     }
 
-    // 실제 디렉토리/파일이 존재하면
+    // Real file/directory exists at dest
     if dest.exists() && !dest.is_symlink() {
         if force {
             if !dry_run {
@@ -103,7 +103,7 @@ pub fn link_one(source: &Path, dest: &Path, dry_run: bool, force: bool) -> LinkO
         if let Some(parent) = dest.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        // 잘못된 심링크 제거
+        // Remove stale symlink
         if dest.is_symlink() {
             let _ = fs::remove_file(dest);
         }

@@ -4,18 +4,19 @@ mod helper;
 mod init;
 mod status;
 mod sync;
+mod tui;
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use owo_colors::OwoColorize;
 
 use config::Config;
 use init::InitOk;
 use sync::SyncOk;
 
 #[derive(Parser)]
-#[command(name = "hana", version, about = "🌸 AI 코딩 에이전트 스킬/지침 동기화")]
+#[command(name = "hana", version, about = "🌸 Sync AI coding agent skills & instructions from a single source")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -23,40 +24,40 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// 설정 파일 생성 (.agents/hana.toml)
+    /// Create config file (.agents/hana.toml)
     Init {
-        /// 글로벌 설정 (~/.agents/hana.toml) 대상
-        #[arg(long)]
+        /// Target global config (~/.agents/hana.toml)
+        #[arg(short, long)]
         global: bool,
 
-        /// 기존 파일 덮어쓰기
-        #[arg(long)]
+        /// Overwrite existing files
+        #[arg(short, long)]
         force: bool,
 
-        /// 실제 변경 없이 미리보기
-        #[arg(long)]
+        /// Preview without making changes
+        #[arg(short, long)]
         dry_run: bool,
     },
 
-    /// 스킬과 지침 동기화
+    /// Sync skills and instructions across agents
     Sync {
-        /// 글로벌 설정 (~/.agents/hana.toml) 대상
-        #[arg(long)]
+        /// Target global config (~/.agents/hana.toml)
+        #[arg(short, long)]
         global: bool,
 
-        /// 기존 파일 덮어쓰기
-        #[arg(long)]
+        /// Overwrite existing files
+        #[arg(short, long)]
         force: bool,
 
-        /// 실제 변경 없이 미리보기
-        #[arg(long)]
+        /// Preview without making changes
+        #[arg(short, long)]
         dry_run: bool,
     },
 
-    /// 동기화 상태 확인
+    /// Show current sync status
     Status {
-        /// 글로벌 설정 (~/.agents/hana.toml) 대상
-        #[arg(long)]
+        /// Target global config (~/.agents/hana.toml)
+        #[arg(short, long)]
         global: bool,
     },
 }
@@ -95,43 +96,60 @@ fn main() {
 
 fn resolve_base_dir(global: bool) -> Result<PathBuf, String> {
     if global {
-        dirs::home_dir().ok_or_else(|| "홈 디렉토리를 찾을 수 없습니다.".to_string())
+        dirs::home_dir().ok_or_else(|| "could not determine home directory".to_string())
     } else {
         Ok(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
     }
 }
 
+// ── init ──
+
 fn run_init(opts: init::InitOptions) -> i32 {
     let base_dir = match resolve_base_dir(opts.global) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("🌸 {e}");
+            eprintln!("{} {e}", "error:".red().bold());
             return 1;
         }
     };
 
     match init::run(&opts, &base_dir) {
         Ok(InitOk::Created { path }) => {
-            println!("🌸 생성 완료: {}", path.display());
+            print!("{}", tui::header("init", false));
+            let rows = vec![format!(
+                "{}  {}",
+                "created".green(),
+                path.display().to_string().bold()
+            )];
+            print!("{}", tui::section("Config", &rows));
+            print!("{}", tui::footer_done());
             0
         }
         Ok(InitOk::DryRun { path, content }) => {
-            println!("🌸 {path} 에 생성될 내용:\n");
-            print!("{content}");
+            print!("{}", tui::header("init", true));
+            let rows = vec![format!(
+                "{}  {}",
+                "would create".cyan(),
+                path.bold()
+            )];
+            print!("{}", tui::section("Config", &rows));
+            println!("{}", content.dimmed());
             0
         }
         Err(e) => {
-            eprintln!("🌸 {e}");
+            eprintln!("{} {e}", "error:".red().bold());
             1
         }
     }
 }
 
+// ── sync ──
+
 fn run_sync(opts: sync::SyncOptions) -> i32 {
     let base_dir = match resolve_base_dir(opts.global) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("🌸 {e}");
+            eprintln!("{} {e}", "error:".red().bold());
             return 1;
         }
     };
@@ -140,85 +158,137 @@ fn run_sync(opts: sync::SyncOptions) -> i32 {
     let config = match Config::load(&config_path) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("🌸 {e}");
-            eprintln!("   hana init 으로 설정 파일을 먼저 생성하세요.");
+            eprintln!("{} {e}", "error:".red().bold());
+            eprintln!(
+                "  run {} to create the config first.",
+                "hana init".bold()
+            );
             return 1;
         }
     };
 
     let result = sync::run(&config, &base_dir, &opts);
 
-    if opts.dry_run {
-        println!("🌸 hana sync (dry-run)\n");
-    } else {
-        println!("🌸 hana sync\n");
-    }
-
-    print_sync_result(&result, &opts);
+    print!("{}", tui::header("sync", opts.dry_run));
+    print_sync_result(&result);
     0
 }
 
-fn print_sync_result(result: &SyncOk, _opts: &sync::SyncOptions) {
-    for (name, agent) in &result.skills_collected {
-        println!("  🆕 {name} ({agent}에서 수집)");
-    }
+fn print_sync_result(result: &SyncOk) {
+    let has_skills = !result.skills_collected.is_empty() || !result.skills_linked.is_empty();
+    let has_instructions = result.instructions_collected.is_some()
+        || !result.instructions_linked.is_empty()
+        || !result.instructions_skipped.is_empty();
+    let has_cleanup = !result.cleaned.is_empty();
+    let has_warnings = !result.warnings.is_empty();
 
-    if !result.skills_linked.is_empty() {
-        println!("스킬 동기화:");
-        let mut by_skill: HashMap<&str, Vec<&str>> = HashMap::new();
-        for (skill, agent) in &result.skills_linked {
-            by_skill.entry(skill).or_default().push(agent);
+    // Skills
+    if has_skills {
+        let mut table_rows: Vec<Vec<String>> = Vec::new();
+
+        for (name, agent) in &result.skills_collected {
+            table_rows.push(vec![
+                tui::label_collected("collected"),
+                name.bold().to_string(),
+                format!("← {}", agent),
+            ]);
         }
-        for (skill, agents) in &by_skill {
-            println!("  ✅ {skill} → {}", agents.join(", "));
+
+        if !result.skills_linked.is_empty() {
+            let mut by_skill: std::collections::HashMap<&str, Vec<&str>> =
+                std::collections::HashMap::new();
+            for (skill, agent) in &result.skills_linked {
+                by_skill.entry(skill).or_default().push(agent);
+            }
+            let mut skills: Vec<_> = by_skill.into_iter().collect();
+            skills.sort_by_key(|(name, _)| *name);
+            for (skill, agents) in &skills {
+                table_rows.push(vec![
+                    tui::label_symlinked("symlinked"),
+                    skill.bold().to_string(),
+                    format!("→ {}", agents.join(", ")),
+                ]);
+            }
         }
+
+        let rows = tui::table(&table_rows);
+        print!("{}", tui::section("Skills", &rows));
     }
 
-    if let Some((file, agent)) = &result.instructions_collected {
-        println!("  🆕 {file} ({agent}에서 수집) → AGENTS.md");
-    }
+    // Instructions
+    if has_instructions {
+        let mut table_rows: Vec<Vec<String>> = Vec::new();
 
-    if !result.instructions_linked.is_empty() || !result.instructions_skipped.is_empty() {
-        println!("지침 동기화:");
+        if let Some((file, agent)) = &result.instructions_collected {
+            table_rows.push(vec![
+                tui::label_collected("collected"),
+                file.bold().to_string(),
+                format!("→ {} (from {})", "AGENTS.md".bold(), agent),
+            ]);
+        }
+
         for agent in &result.instructions_linked {
-            println!("  ✅ {agent}");
+            table_rows.push(vec![
+                tui::label_symlinked("symlinked"),
+                "AGENTS.md".bold().to_string(),
+                format!("→ {agent}"),
+            ]);
         }
+
         if !result.instructions_skipped.is_empty() {
-            println!(
-                "  ℹ️  AGENTS.md ({} 직접 사용)",
-                result.instructions_skipped.join(", ")
-            );
+            table_rows.push(vec![
+                tui::label_native("native"),
+                "AGENTS.md".bold().to_string(),
+                tui::label_native(&result.instructions_skipped.join(", ")),
+            ]);
         }
+
+        let rows = tui::table(&table_rows);
+        print!("{}", tui::section("Instructions", &rows));
     }
 
-    if !result.cleaned.is_empty() {
-        println!("정리:");
-        for path in &result.cleaned {
-            println!("  🗑️  {}", path.display());
-        }
+    // Cleanup
+    if has_cleanup {
+        let rows: Vec<String> = result
+            .cleaned
+            .iter()
+            .map(|path| {
+                format!(
+                    "{}  {} {}",
+                    tui::label_removed("removed"),
+                    path.display(),
+                    "(broken symlink)".dimmed()
+                )
+            })
+            .collect();
+        print!("{}", tui::section("Cleanup", &rows));
     }
 
-    for warn in &result.warnings {
-        eprintln!("  ⚠️  {warn}");
+    // Warnings
+    if has_warnings {
+        let rows: Vec<String> = result
+            .warnings
+            .iter()
+            .map(|w| tui::label_warning(&format!("⚠ {w}")))
+            .collect();
+        print!("{}", tui::section("Warnings", &rows));
     }
 
-    if result.skills_linked.is_empty()
-        && result.skills_collected.is_empty()
-        && result.instructions_collected.is_none()
-        && result.instructions_linked.is_empty()
-        && result.cleaned.is_empty()
-    {
-        println!("변경 없음. 모두 동기화 상태입니다.");
+    // Footer
+    if !has_skills && !has_instructions && !has_cleanup {
+        print!("{}", tui::footer_no_changes());
+    } else {
+        print!("{}", tui::footer_done());
     }
-
-    println!("\n완료!");
 }
+
+// ── status ──
 
 fn run_status(global: bool) -> i32 {
     let base_dir = match resolve_base_dir(global) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("🌸 {e}");
+            eprintln!("{} {e}", "error:".red().bold());
             return 1;
         }
     };
@@ -227,13 +297,85 @@ fn run_status(global: bool) -> i32 {
     let config = match Config::load(&config_path) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("🌸 {e}");
-            eprintln!("   hana init 으로 설정 파일을 먼저 생성하세요.");
+            eprintln!("{} {e}", "error:".red().bold());
+            eprintln!(
+                "  run {} to create the config first.",
+                "hana init".bold()
+            );
             return 1;
         }
     };
 
     let result = status::run(&config, &base_dir, global);
-    print!("{}", status::format_result(&result));
+    print!("{}", tui::header("status", false));
+    print!("{}", format_status(&result));
     0
+}
+
+fn format_status(result: &status::StatusOk) -> String {
+    use status::{InstructionState, SkillState};
+
+    let mut out = String::new();
+
+    // Skills
+    if result.skills.is_empty() {
+        let rows = vec![tui::label_native("(none)")];
+        out.push_str(&tui::section("Skills", &rows));
+    } else {
+        let mut table_rows: Vec<Vec<String>> = Vec::new();
+        for skill in &result.skills {
+            let mut row = vec![skill.name.bold().to_string()];
+            for (agent, state) in &skill.agents {
+                row.push(match state {
+                    SkillState::Synced => tui::badge_ok(agent),
+                    SkillState::RealDir => tui::badge_warn(&format!("{agent} (real dir)")),
+                    SkillState::BrokenSymlink => tui::badge_broken(&format!("{agent} (broken)")),
+                    SkillState::Missing => tui::badge_err(agent),
+                    SkillState::WrongTarget => {
+                        tui::badge_warn(&format!("{agent} (wrong target)"))
+                    }
+                });
+            }
+            table_rows.push(row);
+        }
+        let rows = tui::table(&table_rows);
+        out.push_str(&tui::section("Skills", &rows));
+    }
+
+    // Instructions
+    {
+        let mut table_rows: Vec<Vec<String>> = Vec::new();
+
+        // Source row
+        if result.instructions.source_exists {
+            table_rows.push(vec![
+                result.instructions.source.bold().to_string(),
+                tui::badge_ok("source"),
+            ]);
+        } else {
+            table_rows.push(vec![
+                result.instructions.source.bold().to_string(),
+                tui::badge_err("missing"),
+            ]);
+        }
+
+        // Agent rows
+        for (agent, state) in &result.instructions.agents {
+            table_rows.push(vec![
+                agent.to_string(),
+                match state {
+                    InstructionState::Synced => tui::badge_ok("symlinked"),
+                    InstructionState::DirectRead => tui::badge_info("native"),
+                    InstructionState::RealFile => tui::badge_warn("real file (conflict)"),
+                    InstructionState::Missing => tui::badge_err("missing"),
+                    InstructionState::Disabled => tui::badge_skip("disabled"),
+                },
+            ]);
+        }
+
+        let rows = tui::table(&table_rows);
+        out.push_str(&tui::section("Instructions", &rows));
+    }
+
+    out
 }

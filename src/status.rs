@@ -67,7 +67,7 @@ pub fn run(is_global: bool) -> Result<StatusOk, StatusError> {
     let base_dir = if is_global {
         dirs::home_dir().ok_or(StatusError::NoHomeDir)?
     } else {
-        PathBuf::from(".")
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     };
 
     let config_path = base_dir.join(".agents/hana.toml");

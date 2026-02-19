@@ -92,7 +92,7 @@ pub fn run(opts: &SyncOptions) -> Result<SyncOk, SyncError> {
     let base_dir = if opts.global {
         dirs::home_dir().ok_or(SyncError::NoHomeDir)?
     } else {
-        PathBuf::from(".")
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     };
 
     let config_path = base_dir.join(".agents/hana.toml");
@@ -489,5 +489,20 @@ mod tests {
         assert!(!result.skills_linked.is_empty());
         assert!(!tmp.path().join(".claude/skills/my-skill").exists());
         assert!(!tmp.path().join("CLAUDE.md").exists());
+    }
+
+    #[test]
+    fn test_sync_dry_run_collect_no_false_conflict() {
+        let tmp = TempDir::new().unwrap();
+        let pi_skill = tmp.path().join(".pi/skills/new-skill");
+        fs::create_dir_all(&pi_skill).unwrap();
+        fs::write(pi_skill.join("SKILL.md"), "# New").unwrap();
+
+        let opts = SyncOptions { dry_run: true, ..Default::default() };
+        let result = execute(&Config::default(), tmp.path(), &opts);
+
+        assert!(result.skills_collected.iter().any(|(n, a)| n == "new-skill" && a == "pi"));
+        assert!(result.skills_linked.iter().any(|(n, a)| n == "new-skill" && a == "pi"));
+        assert!(!result.warnings.iter().any(|w| matches!(w, SyncWarning::FileConflict { agent, .. } if agent == "pi")));
     }
 }

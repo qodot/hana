@@ -188,7 +188,7 @@ pub fn run(opts: &InitOptions) -> Result<InitOk, InitError> {
     let base_dir = if opts.global {
         dirs::home_dir().ok_or(InitError::NoHomeDir)?
     } else {
-        PathBuf::from(".")
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     };
 
     execute(opts, &base_dir)

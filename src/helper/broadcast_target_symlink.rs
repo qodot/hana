@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::AgentName;
+use crate::helper::relative_path::relative_path;
 
 #[derive(Debug, Default)]
 pub struct BroadcastOk {
@@ -75,13 +76,17 @@ pub enum LinkOutcome {
 }
 
 pub fn link_one(source: &Path, dest: &Path, dry_run: bool, force: bool) -> LinkOutcome {
+    let rel_source = dest
+        .parent()
+        .map(|parent| relative_path(parent, source))
+        .unwrap_or_else(|| source.to_path_buf());
+
     // Already a valid symlink — skip
-    if dest.is_symlink() {
-        if let Ok(target) = fs::read_link(dest) {
-            if target == source {
-                return LinkOutcome::AlreadyValid;
-            }
-        }
+    if dest.is_symlink()
+        && let Ok(target) = fs::read_link(dest)
+        && target == rel_source
+    {
+        return LinkOutcome::AlreadyValid;
     }
 
     // Real file/directory exists at dest
@@ -107,7 +112,7 @@ pub fn link_one(source: &Path, dest: &Path, dry_run: bool, force: bool) -> LinkO
         if dest.is_symlink() {
             let _ = fs::remove_file(dest);
         }
-        if let Err(e) = std::os::unix::fs::symlink(source, dest) {
+        if let Err(e) = std::os::unix::fs::symlink(&rel_source, dest) {
             return LinkOutcome::Failed(e.to_string());
         }
     }
@@ -141,8 +146,17 @@ mod tests {
         assert_eq!(result.linked.len(), 2);
         assert!(result.linked.contains(&AgentName::Claude));
         assert!(result.linked.contains(&AgentName::Pi));
-        assert_eq!(fs::read_link(claude_dir.join("skill-a")).unwrap(), source);
-        assert_eq!(fs::read_link(pi_dir.join("skill-a")).unwrap(), source);
+        assert_eq!(
+            fs::canonicalize(claude_dir.join("skill-a")).unwrap(),
+            fs::canonicalize(&source).unwrap()
+        );
+        assert_eq!(
+            fs::canonicalize(pi_dir.join("skill-a")).unwrap(),
+            fs::canonicalize(&source).unwrap()
+        );
+        // Verify symlinks use relative paths
+        assert!(fs::read_link(claude_dir.join("skill-a")).unwrap().is_relative());
+        assert!(fs::read_link(pi_dir.join("skill-a")).unwrap().is_relative());
     }
 
     #[test]
@@ -153,7 +167,8 @@ mod tests {
 
         let dest_dir = tmp.path().join("agent1");
         fs::create_dir_all(&dest_dir).unwrap();
-        std::os::unix::fs::symlink(&source, dest_dir.join("skill-a")).unwrap();
+        let rel = relative_path(&dest_dir, &source);
+        std::os::unix::fs::symlink(&rel, dest_dir.join("skill-a")).unwrap();
 
         let dests = HashMap::from([(AgentName::Claude, dest_dir)]);
         let result = broadcast_target_symlink(&source, &dests, false, false).unwrap();
@@ -192,7 +207,11 @@ mod tests {
 
         assert_eq!(result.linked, vec![AgentName::Claude]);
         assert!(dest_dir.join("skill-a").is_symlink());
-        assert_eq!(fs::read_link(dest_dir.join("skill-a")).unwrap(), source);
+        assert_eq!(
+            fs::canonicalize(dest_dir.join("skill-a")).unwrap(),
+            fs::canonicalize(&source).unwrap()
+        );
+        assert!(fs::read_link(dest_dir.join("skill-a")).unwrap().is_relative());
     }
 
     #[test]
@@ -244,7 +263,11 @@ mod tests {
         let result = broadcast_target_symlink(&source, &dests, false, false).unwrap();
 
         assert_eq!(result.linked, vec![AgentName::Claude]);
-        assert_eq!(fs::read_link(dest_dir.join("skill-a")).unwrap(), source);
+        assert_eq!(
+            fs::canonicalize(dest_dir.join("skill-a")).unwrap(),
+            fs::canonicalize(&source).unwrap()
+        );
+        assert!(fs::read_link(dest_dir.join("skill-a")).unwrap().is_relative());
     }
 
     #[test]

@@ -7,6 +7,7 @@ use crate::helper::broadcast_target_symlink::{broadcast_target_symlink, link_one
 use crate::helper::collect_source_skills::collect_source_skills;
 use crate::helper::collect_target_skills::collect_target_skills;
 use crate::helper::move_target_skills::move_target_skills;
+use crate::helper::relative_path::relative_path;
 use crate::helper::resolve_target_destinations::resolve_target_destinations;
 
 // --- Options ---
@@ -367,7 +368,11 @@ fn collect_instruction(
             );
             return None;
         }
-        if let Err(e) = std::os::unix::fs::symlink(source_path, &agent_path) {
+        let rel_source = agent_path
+            .parent()
+            .map(|parent| relative_path(parent, source_path))
+            .unwrap_or_else(|| source_path.to_path_buf());
+        if let Err(e) = std::os::unix::fs::symlink(&rel_source, &agent_path) {
             eprintln!(
                 "  ⚠ failed to create symlink ({}): {e}",
                 agent_path.display()
@@ -520,9 +525,11 @@ mod tests {
         );
         assert!(tmp.path().join("CLAUDE.md").is_symlink());
         assert_eq!(
-            fs::read_link(tmp.path().join("CLAUDE.md")).unwrap(),
-            tmp.path().join("AGENTS.md")
+            fs::canonicalize(tmp.path().join("CLAUDE.md")).unwrap(),
+            fs::canonicalize(tmp.path().join("AGENTS.md")).unwrap()
         );
+        // Verify symlink uses relative path
+        assert!(fs::read_link(tmp.path().join("CLAUDE.md")).unwrap().is_relative());
         assert!(result.instructions_collected.is_some());
         let (file, agent) = result.instructions_collected.unwrap();
         assert_eq!(file, "CLAUDE.md");

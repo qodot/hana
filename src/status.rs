@@ -121,14 +121,9 @@ pub fn run(config: &Config, base_dir: &Path, global: bool) -> StatusOk {
             }
 
             if link_path.is_symlink() {
-                if let Ok(target) = fs::read_link(&link_path) {
-                    if target == source_path {
-                        (name.to_string(), InstructionState::Synced)
-                    } else {
-                        (name.to_string(), InstructionState::Missing)
-                    }
-                } else {
-                    (name.to_string(), InstructionState::Missing)
+                match (fs::canonicalize(&link_path), fs::canonicalize(&source_path)) {
+                    (Ok(a), Ok(b)) if a == b => (name.to_string(), InstructionState::Synced),
+                    _ => (name.to_string(), InstructionState::Missing),
                 }
             } else if link_path.exists() {
                 (name.to_string(), InstructionState::RealFile)
@@ -152,14 +147,12 @@ fn check_skill_state(link_path: &Path, expected_target: &Path) -> SkillState {
     if link_path.is_symlink() {
         if !link_path.exists() {
             SkillState::BrokenSymlink
-        } else if let Ok(target) = fs::read_link(link_path) {
-            if target == expected_target {
-                SkillState::Synced
-            } else {
-                SkillState::WrongTarget
-            }
         } else {
-            SkillState::BrokenSymlink
+            match (fs::canonicalize(link_path), fs::canonicalize(expected_target)) {
+                (Ok(a), Ok(b)) if a == b => SkillState::Synced,
+                (Ok(_), Ok(_)) => SkillState::WrongTarget,
+                _ => SkillState::BrokenSymlink,
+            }
         }
     } else if link_path.is_dir() {
         SkillState::RealDir

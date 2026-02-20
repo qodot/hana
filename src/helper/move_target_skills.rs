@@ -142,7 +142,8 @@ mod tests {
             vec![("new-skill".to_string(), pi_skill.clone())],
         )]);
 
-        let move_result = move_target_skills(&collected_by_agent, &source_dir, false, false).unwrap();
+        let move_result =
+            move_target_skills(&collected_by_agent, &source_dir, false, false).unwrap();
         let tasks = move_result.tasks;
 
         assert!(source_dir.join("new-skill").is_dir());
@@ -170,7 +171,8 @@ mod tests {
             vec![("my-skill".to_string(), pi_skill.clone())],
         )]);
 
-        let move_result = move_target_skills(&collected_by_agent, &source_dir, false, false).unwrap_err();
+        let move_result =
+            move_target_skills(&collected_by_agent, &source_dir, false, false).unwrap_err();
         let tasks = move_result.tasks;
 
         assert!(tasks.is_empty());
@@ -203,7 +205,8 @@ mod tests {
             vec![("my-skill".to_string(), pi_skill.clone())],
         )]);
 
-        let move_result = move_target_skills(&collected_by_agent, &source_dir, true, false).unwrap();
+        let move_result =
+            move_target_skills(&collected_by_agent, &source_dir, true, false).unwrap();
         let tasks = move_result.tasks;
 
         assert_eq!(tasks.len(), 1);
@@ -236,7 +239,8 @@ mod tests {
             ),
         ]);
 
-        let move_result = move_target_skills(&collected_by_agent, &source_dir, false, false).unwrap_err();
+        let move_result =
+            move_target_skills(&collected_by_agent, &source_dir, false, false).unwrap_err();
         let tasks = move_result.tasks;
 
         assert!(tasks.is_empty());
@@ -267,7 +271,8 @@ mod tests {
             vec![("new-skill".to_string(), pi_skill.clone())],
         )]);
 
-        let move_result = move_target_skills(&collected_by_agent, &source_dir, false, true).unwrap();
+        let move_result =
+            move_target_skills(&collected_by_agent, &source_dir, false, true).unwrap();
         let tasks = move_result.tasks;
 
         assert_eq!(tasks.len(), 1);

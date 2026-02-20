@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::{AgentName, Config, TargetFeature};
-use crate::helper::broadcast_target_symlink::{broadcast_target_symlink, link_one, LinkOutcome};
+use crate::helper::broadcast_target_symlink::{LinkOutcome, broadcast_target_symlink, link_one};
 use crate::helper::collect_source_skills::collect_source_skills;
 use crate::helper::collect_target_skills::collect_target_skills;
 use crate::helper::move_target_skills::move_target_skills;
@@ -408,10 +408,10 @@ mod tests {
         let result = run(&Config::default(), tmp.path(), &SyncOptions::default());
 
         assert!(tmp.path().join(".claude/skills/my-skill").is_symlink());
-        assert!(tmp.path().join(".pi/skills/my-skill").is_symlink());
         assert!(tmp.path().join(".opencode/skills/my-skill").is_symlink());
+        // Pi and Codex use .agents/skills (same as source), no symlinks needed
         assert!(!tmp.path().join(".agents/skills/my-skill").is_symlink());
-        assert!(result.skills_linked.len() >= 3);
+        assert!(result.skills_linked.len() >= 2);
         assert!(tmp.path().join("CLAUDE.md").is_symlink());
         assert!(result.instructions_linked.contains(&"claude".to_string()));
         assert!(result.warnings.is_empty());
@@ -435,14 +435,14 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         setup_source(tmp.path());
 
-        let pi_new = tmp.path().join(".pi/skills/new-skill");
-        fs::create_dir_all(&pi_new).unwrap();
-        fs::write(pi_new.join("SKILL.md"), "# New").unwrap();
+        // Use claude path (claude still needs symlinks)
+        let claude_new = tmp.path().join(".claude/skills/new-skill");
+        fs::create_dir_all(&claude_new).unwrap();
+        fs::write(claude_new.join("SKILL.md"), "# New").unwrap();
 
         let result = run(&Config::default(), tmp.path(), &SyncOptions::default());
 
         assert!(tmp.path().join(".agents/skills/new-skill").is_dir());
-        assert!(tmp.path().join(".pi/skills/new-skill").is_symlink());
         assert!(tmp.path().join(".claude/skills/new-skill").is_symlink());
         assert!(tmp.path().join(".opencode/skills/new-skill").is_symlink());
         assert!(!result.skills_collected.is_empty());
@@ -458,7 +458,10 @@ mod tests {
         config.source.skills_path_global = ".agents/skills".to_string();
         config.source.instruction_path_global = "AGENTS.md".to_string();
 
-        let opts = SyncOptions { global: true, ..Default::default() };
+        let opts = SyncOptions {
+            global: true,
+            ..Default::default()
+        };
         run(&config, tmp.path(), &opts);
 
         assert!(tmp.path().join(".claude/CLAUDE.md").is_symlink());
@@ -487,7 +490,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         setup_source(tmp.path());
 
-        let opts = SyncOptions { dry_run: true, ..Default::default() };
+        let opts = SyncOptions {
+            dry_run: true,
+            ..Default::default()
+        };
         let result = run(&Config::default(), tmp.path(), &opts);
 
         assert!(!result.skills_linked.is_empty());
@@ -498,16 +504,35 @@ mod tests {
     #[test]
     fn test_sync_dry_run_collect_no_false_conflict() {
         let tmp = TempDir::new().unwrap();
-        let pi_skill = tmp.path().join(".pi/skills/new-skill");
-        fs::create_dir_all(&pi_skill).unwrap();
-        fs::write(pi_skill.join("SKILL.md"), "# New").unwrap();
+        // Use claude path since pi uses .agents/skills (same as source)
+        let claude_skill = tmp.path().join(".claude/skills/new-skill");
+        fs::create_dir_all(&claude_skill).unwrap();
+        fs::write(claude_skill.join("SKILL.md"), "# New").unwrap();
 
-        let opts = SyncOptions { dry_run: true, ..Default::default() };
+        let opts = SyncOptions {
+            dry_run: true,
+            ..Default::default()
+        };
         let result = run(&Config::default(), tmp.path(), &opts);
 
-        assert!(result.skills_collected.iter().any(|(n, a)| n == "new-skill" && a == "pi"));
-        assert!(result.skills_linked.iter().any(|(n, a)| n == "new-skill" && a == "pi"));
-        assert!(!result.warnings.iter().any(|w| matches!(w, SyncWarning::FileConflict { agent, .. } if agent == "pi")));
+        assert!(
+            result
+                .skills_collected
+                .iter()
+                .any(|(n, a)| n == "new-skill" && a == "claude")
+        );
+        assert!(
+            result
+                .skills_linked
+                .iter()
+                .any(|(n, a)| n == "new-skill" && a == "claude")
+        );
+        assert!(
+            !result
+                .warnings
+                .iter()
+                .any(|w| matches!(w, SyncWarning::FileConflict { agent, .. } if agent == "claude"))
+        );
     }
 
     #[test]
@@ -529,7 +554,11 @@ mod tests {
             fs::canonicalize(tmp.path().join("AGENTS.md")).unwrap()
         );
         // Verify symlink uses relative path
-        assert!(fs::read_link(tmp.path().join("CLAUDE.md")).unwrap().is_relative());
+        assert!(
+            fs::read_link(tmp.path().join("CLAUDE.md"))
+                .unwrap()
+                .is_relative()
+        );
         assert!(result.instructions_collected.is_some());
         let (file, agent) = result.instructions_collected.unwrap();
         assert_eq!(file, "CLAUDE.md");
@@ -541,7 +570,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         fs::write(tmp.path().join("CLAUDE.md"), "# Claude Instructions").unwrap();
 
-        let opts = SyncOptions { dry_run: true, ..Default::default() };
+        let opts = SyncOptions {
+            dry_run: true,
+            ..Default::default()
+        };
         let result = run(&Config::default(), tmp.path(), &opts);
 
         assert!(!tmp.path().join("AGENTS.md").exists());
@@ -560,7 +592,10 @@ mod tests {
         fs::write(tmp.path().join("AGENTS.md"), "# Source").unwrap();
         fs::write(tmp.path().join("CLAUDE.md"), "# Claude").unwrap();
 
-        let opts = SyncOptions { force: true, ..Default::default() };
+        let opts = SyncOptions {
+            force: true,
+            ..Default::default()
+        };
         let result = run(&Config::default(), tmp.path(), &opts);
 
         assert!(result.instructions_collected.is_none());

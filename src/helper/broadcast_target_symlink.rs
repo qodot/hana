@@ -155,7 +155,11 @@ mod tests {
             fs::canonicalize(&source).unwrap()
         );
         // Verify symlinks use relative paths
-        assert!(fs::read_link(claude_dir.join("skill-a")).unwrap().is_relative());
+        assert!(
+            fs::read_link(claude_dir.join("skill-a"))
+                .unwrap()
+                .is_relative()
+        );
         assert!(fs::read_link(pi_dir.join("skill-a")).unwrap().is_relative());
     }
 
@@ -211,7 +215,11 @@ mod tests {
             fs::canonicalize(dest_dir.join("skill-a")).unwrap(),
             fs::canonicalize(&source).unwrap()
         );
-        assert!(fs::read_link(dest_dir.join("skill-a")).unwrap().is_relative());
+        assert!(
+            fs::read_link(dest_dir.join("skill-a"))
+                .unwrap()
+                .is_relative()
+        );
     }
 
     #[test]
@@ -267,7 +275,11 @@ mod tests {
             fs::canonicalize(dest_dir.join("skill-a")).unwrap(),
             fs::canonicalize(&source).unwrap()
         );
-        assert!(fs::read_link(dest_dir.join("skill-a")).unwrap().is_relative());
+        assert!(
+            fs::read_link(dest_dir.join("skill-a"))
+                .unwrap()
+                .is_relative()
+        );
     }
 
     #[test]

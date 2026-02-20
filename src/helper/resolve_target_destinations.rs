@@ -61,15 +61,16 @@ mod tests {
     #[test]
     fn test_resolve_target_destinations_uses_global_paths() {
         let tmp = TempDir::new().unwrap();
-        let config = Config::default();
+        let mut config = Config::default();
+        // Override source to match target (in tests, ~ resolves to home, not tmp)
+        config.source.skills_path_global = ".agents/skills".to_string();
 
         let destinations =
             resolve_target_destinations(&config, tmp.path(), true, TargetFeature::Skills);
 
-        assert_eq!(
-            destinations.get(&AgentName::Pi).unwrap(),
-            &tmp.path().join(".pi/agent/skills")
-        );
+        // Pi and Codex use .agents/skills (same as source), so excluded
+        assert!(!destinations.contains_key(&AgentName::Pi));
+        assert!(!destinations.contains_key(&AgentName::Codex));
         assert_eq!(
             destinations.get(&AgentName::Opencode).unwrap(),
             &tmp.path().join(".config/opencode/skills")
@@ -80,14 +81,14 @@ mod tests {
     fn test_resolve_target_destinations_respects_custom_source_exclusion() {
         let tmp = TempDir::new().unwrap();
         let mut config = Config::default();
-        config.source.skills_path = ".pi/skills".to_string();
+        config.source.skills_path = ".opencode/skills".to_string();
 
         let destinations =
             resolve_target_destinations(&config, tmp.path(), false, TargetFeature::Skills);
 
         let agents: Vec<AgentName> = destinations.keys().copied().collect();
         assert!(agents.contains(&AgentName::Claude));
-        assert!(!agents.contains(&AgentName::Pi)); // same path as source
+        assert!(!agents.contains(&AgentName::Opencode)); // same path as source
     }
 
     #[test]

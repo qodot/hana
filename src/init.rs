@@ -131,8 +131,8 @@ instruction_path_global = ".codex/AGENTS.md"
 [target.pi]
 skills = true
 instructions = true
-skills_path = ".pi/skills"
-skills_path_global = ".pi/agent/skills"
+skills_path = ".agents/skills"
+skills_path_global = ".agents/skills"
 instruction_path = "AGENTS.md"
 instruction_path_global = ".pi/agent/AGENTS.md"
 
@@ -173,8 +173,8 @@ instruction_path_global = ".codex/AGENTS.md"
 [target.pi]
 skills = true
 instructions = true
-skills_path = ".pi/skills"
-skills_path_global = ".pi/agent/skills"
+skills_path = ".agents/skills"
+skills_path_global = ".agents/skills"
 instruction_path = "AGENTS.md"
 instruction_path_global = ".pi/agent/AGENTS.md"
 

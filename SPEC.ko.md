@@ -10,13 +10,13 @@ hana는 여러 AI 코딩 에이전트의 스킬과 지침을 하나의 소스에
 |---------|-------------------|------------------|----------|
 | Claude Code | `.claude/skills/` | `~/.claude/skills/` | `CLAUDE.md` |
 | Codex | `.agents/skills/` | `~/.agents/skills/` | `AGENTS.md` |
-| Pi | `.pi/skills/` | `~/.pi/agent/skills/` | `PI.md` |
+| Pi | `.agents/skills/` | `~/.agents/skills/` | `PI.md` |
 | OpenCode | `.opencode/skills/` | `~/.config/opencode/skills/` | `AGENTS.md` |
 
 ### 호환성 참고
 
 - OpenCode는 `.claude/skills/`와 `.agents/skills/`도 자동 스캔한다.
-- Pi는 설정에서 다른 에이전트의 스킬 경로를 추가할 수 있다.
+- Pi도 `.agents/skills/` (프로젝트/글로벌)를 자동 스캔하므로 스킬 심링크가 필요 없다.
 - Codex와 OpenCode는 지침 파일명이 동일하다(`AGENTS.md`).
 
 ## 소스 오브 트루스
@@ -45,20 +45,19 @@ Agent Skills 표준(`agentskills.io`)의 경로이자 Codex의 기본 경로를 
 ```
 .agents/skills/my-skill/  ← 소스 (실제 디렉토리)
 .claude/skills/my-skill   → .agents/skills/my-skill (심링크)
-.pi/skills/my-skill       → .agents/skills/my-skill (심링크)
 .opencode/skills/my-skill → .agents/skills/my-skill (심링크)
 ```
 
-Codex는 소스 경로와 동일하므로 심링크를 만들지 않는다.
+Codex와 Pi는 소스 경로와 동일하므로 심링크를 만들지 않는다.
 
 ### 수집 (에이전트 → 소스)
 
 각 에이전트 경로에서 심링크가 아닌 실제 디렉토리를 새 스킬로 감지한다.
 
 ```
-.pi/skills/new-skill/  ← 실제 디렉토리 (Pi가 생성)
+.claude/skills/new-skill/  ← 실제 디렉토리 (Claude Code가 생성)
   1. .agents/skills/new-skill/로 이동 (mv)
-  2. .pi/skills/new-skill → .agents/skills/new-skill 심링크 생성
+  2. .claude/skills/new-skill → .agents/skills/new-skill 심링크 생성
   3. 다른 에이전트 경로에도 심링크 생성
 ```
 

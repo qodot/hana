@@ -10,13 +10,13 @@ hana is a CLI tool that manages skills and instructions for multiple AI coding a
 |-------|-----------------|-----------------|-------------|
 | Claude Code | `.claude/skills/` | `~/.claude/skills/` | `CLAUDE.md` |
 | Codex | `.agents/skills/` | `~/.agents/skills/` | `AGENTS.md` |
-| Pi | `.pi/skills/` | `~/.pi/agent/skills/` | `PI.md` |
+| Pi | `.agents/skills/` | `~/.agents/skills/` | `PI.md` |
 | OpenCode | `.opencode/skills/` | `~/.config/opencode/skills/` | `AGENTS.md` |
 
 ### Compatibility Notes
 
 - OpenCode also scans `.claude/skills/` and `.agents/skills/` automatically.
-- Pi lets you add other agents' skill paths in settings.
+- Pi also scans `.agents/skills/` (project and global) automatically, so no skill symlinks are needed.
 - Codex and OpenCode share the same instructions filename (`AGENTS.md`).
 
 ## Source of Truth
@@ -45,20 +45,19 @@ Symlink each skill directory from the source to each agent's path.
 ```
 .agents/skills/my-skill/  ← source (real directory)
 .claude/skills/my-skill   → .agents/skills/my-skill (symlink)
-.pi/skills/my-skill       → .agents/skills/my-skill (symlink)
 .opencode/skills/my-skill → .agents/skills/my-skill (symlink)
 ```
 
-Codex uses the same path as the source, so no symlink is needed.
+Codex and Pi use the same path as the source, so no symlinks are needed.
 
 ### Collection (Agents → Source)
 
 Detects real directories (not symlinks) in each agent's path as new skills.
 
 ```
-.pi/skills/new-skill/  ← real directory (created by Pi)
+.claude/skills/new-skill/  ← real directory (created by Claude Code)
   1. Move to .agents/skills/new-skill/ (mv)
-  2. Create symlink .pi/skills/new-skill → .agents/skills/new-skill
+  2. Create symlink .claude/skills/new-skill → .agents/skills/new-skill
   3. Create symlinks in other agent paths too
 ```
 

@@ -5,14 +5,14 @@ pub fn collect_skills(global: bool, source: &str) -> Vec<(&'static str, &'static
         &[
             ("claude", ".claude/skills"),
             ("codex", ".agents/skills"),
-            ("pi", ".pi/agent/skills"),
+            ("pi", ".agents/skills"),
             ("opencode", ".config/opencode/skills"),
         ]
     } else {
         &[
             ("claude", ".claude/skills"),
             ("codex", ".agents/skills"),
-            ("pi", ".pi/skills"),
+            ("pi", ".agents/skills"),
             ("opencode", ".opencode/skills"),
         ]
     };
@@ -55,16 +55,17 @@ mod tests {
         let skills = collect_skills(false, ".agents/skills");
         let agents: Vec<&str> = skills.iter().map(|(a, _)| *a).collect();
         assert!(agents.contains(&"claude"));
-        assert!(agents.contains(&"pi"));
         assert!(agents.contains(&"opencode"));
+        // codex and pi use the same path as source, so they are excluded
         assert!(!agents.contains(&"codex"));
+        assert!(!agents.contains(&"pi"));
     }
 
     #[test]
     fn test_collect_skills_global_paths() {
         let skills = collect_skills(true, ".agents/skills");
-        let pi = skills.iter().find(|(a, _)| *a == "pi").unwrap();
-        assert_eq!(pi.1, ".pi/agent/skills");
+        // pi uses .agents/skills (same as source), so excluded
+        assert!(!skills.iter().any(|(a, _)| *a == "pi"));
         let oc = skills.iter().find(|(a, _)| *a == "opencode").unwrap();
         assert_eq!(oc.1, ".config/opencode/skills");
     }
@@ -92,6 +93,7 @@ mod tests {
 
     #[test]
     fn test_all_agents_covered() {
+        // With empty source, all 4 agents are included
         let skills = collect_skills(false, "");
         assert_eq!(skills.len(), 4);
         let instructions = collect_instructions(false);

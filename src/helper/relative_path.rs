@@ -82,10 +82,7 @@ mod tests {
     fn test_instruction_same_dir() {
         // CLAUDE.md -> AGENTS.md (same directory)
         assert_eq!(
-            relative_path(
-                Path::new("/project"),
-                Path::new("/project/AGENTS.md")
-            ),
+            relative_path(Path::new("/project"), Path::new("/project/AGENTS.md")),
             PathBuf::from("AGENTS.md")
         );
     }

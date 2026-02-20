@@ -148,7 +148,10 @@ fn check_skill_state(link_path: &Path, expected_target: &Path) -> SkillState {
         if !link_path.exists() {
             SkillState::BrokenSymlink
         } else {
-            match (fs::canonicalize(link_path), fs::canonicalize(expected_target)) {
+            match (
+                fs::canonicalize(link_path),
+                fs::canonicalize(expected_target),
+            ) {
                 (Ok(a), Ok(b)) if a == b => SkillState::Synced,
                 (Ok(_), Ok(_)) => SkillState::WrongTarget,
                 _ => SkillState::BrokenSymlink,
@@ -365,6 +368,9 @@ mod tests {
         assert_eq!(result.skills[0].agents[1].1, SkillState::Missing);
         assert!(result.instructions.source_exists);
         assert_eq!(result.instructions.agents[0].1, InstructionState::Synced);
-        assert_eq!(result.instructions.agents[1].1, InstructionState::DirectRead);
+        assert_eq!(
+            result.instructions.agents[1].1,
+            InstructionState::DirectRead
+        );
     }
 }

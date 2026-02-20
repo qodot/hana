@@ -16,7 +16,11 @@ use init::InitOk;
 use sync::SyncOk;
 
 #[derive(Parser)]
-#[command(name = "hana", version, about = "🌸 Sync AI coding agent skills & instructions from a single source")]
+#[command(
+    name = "hana",
+    version,
+    about = "🌸 Sync AI coding agent skills & instructions from a single source"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -127,11 +131,7 @@ fn run_init(opts: init::InitOptions) -> i32 {
         }
         Ok(InitOk::DryRun { path, content }) => {
             print!("{}", tui::header("init", true));
-            let rows = vec![format!(
-                "{}  {}",
-                "would create".cyan(),
-                path.bold()
-            )];
+            let rows = vec![format!("{}  {}", "would create".cyan(), path.bold())];
             print!("{}", tui::section("Config", &rows));
             println!("{}", content.dimmed());
             0
@@ -159,10 +159,7 @@ fn run_sync(opts: sync::SyncOptions) -> i32 {
         Ok(c) => c,
         Err(e) => {
             eprintln!("{} {e}", "error:".red().bold());
-            eprintln!(
-                "  run {} to create the config first.",
-                "hana init".bold()
-            );
+            eprintln!("  run {} to create the config first.", "hana init".bold());
             return 1;
         }
     };
@@ -298,10 +295,7 @@ fn run_status(global: bool) -> i32 {
         Ok(c) => c,
         Err(e) => {
             eprintln!("{} {e}", "error:".red().bold());
-            eprintln!(
-                "  run {} to create the config first.",
-                "hana init".bold()
-            );
+            eprintln!("  run {} to create the config first.", "hana init".bold());
             return 1;
         }
     };
@@ -331,9 +325,7 @@ fn format_status(result: &status::StatusOk) -> String {
                     SkillState::RealDir => tui::badge_warn(&format!("{agent} (real dir)")),
                     SkillState::BrokenSymlink => tui::badge_broken(&format!("{agent} (broken)")),
                     SkillState::Missing => tui::badge_err(agent),
-                    SkillState::WrongTarget => {
-                        tui::badge_warn(&format!("{agent} (wrong target)"))
-                    }
+                    SkillState::WrongTarget => tui::badge_warn(&format!("{agent} (wrong target)")),
                 });
             }
             table_rows.push(row);

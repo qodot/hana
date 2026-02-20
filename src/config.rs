@@ -18,11 +18,7 @@ impl std::fmt::Display for ConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ReadFile { path, source } => {
-                write!(
-                    f,
-                    "cannot read config file ({}): {source}",
-                    path.display()
-                )
+                write!(f, "cannot read config file ({}): {source}", path.display())
             }
             Self::Parse { message } => write!(f, "TOML parse error: {message}"),
         }
@@ -105,7 +101,7 @@ impl TargetConfig {
         let (skills_path, skills_path_global) = match agent {
             AgentName::Claude => (".claude/skills", ".claude/skills"),
             AgentName::Codex => (".agents/skills", ".agents/skills"),
-            AgentName::Pi => (".pi/skills", ".pi/agent/skills"),
+            AgentName::Pi => (".agents/skills", ".agents/skills"),
             AgentName::Opencode => (".opencode/skills", ".config/opencode/skills"),
         };
 
@@ -355,11 +351,11 @@ mod tests {
         assert_eq!(config.targets.len(), 4);
         assert_eq!(
             config.target_skills_path("pi", false).unwrap(),
-            ".pi/skills"
+            ".agents/skills"
         );
         assert_eq!(
             config.target_skills_path("pi", true).unwrap(),
-            ".pi/agent/skills"
+            ".agents/skills"
         );
     }
 

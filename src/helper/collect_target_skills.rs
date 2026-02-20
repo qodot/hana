@@ -65,33 +65,38 @@ mod tests {
     }
 
     #[test]
-    fn test_collect_skills_uses_global_pi_path() {
+    fn test_collect_skills_pi_excluded_same_as_source() {
         let tmp = TempDir::new().unwrap();
+
+        // Project mode: pi and codex both use .agents/skills (same as source)
         let config = Config::default();
+        fs::create_dir_all(tmp.path().join(".agents/skills/some-skill")).unwrap();
 
-        fs::create_dir_all(tmp.path().join(".pi/agent/skills/global-skill")).unwrap();
-        fs::create_dir_all(tmp.path().join(".pi/skills/project-skill")).unwrap();
+        let project_result = collect_target_skills(&config, tmp.path(), false);
+        assert!(!project_result.contains_key(&AgentName::Pi));
+        assert!(!project_result.contains_key(&AgentName::Codex));
 
-        let result = collect_target_skills(&config, tmp.path(), true);
-        let pi_skills = result.get(&AgentName::Pi).unwrap();
-        let names: Vec<&str> = pi_skills.iter().map(|(name, _)| name.as_str()).collect();
+        // Global mode: override source to match target (in tests, ~ resolves differently)
+        let mut global_config = Config::default();
+        global_config.source.skills_path_global = ".agents/skills".to_string();
 
-        assert!(names.contains(&"global-skill"));
-        assert!(!names.contains(&"project-skill"));
+        let global_result = collect_target_skills(&global_config, tmp.path(), true);
+        assert!(!global_result.contains_key(&AgentName::Pi));
+        assert!(!global_result.contains_key(&AgentName::Codex));
     }
 
     #[test]
     fn test_collect_skills_respects_custom_source_exclusion() {
         let tmp = TempDir::new().unwrap();
         let mut config = Config::default();
-        config.source.skills_path = ".pi/skills".to_string();
+        config.source.skills_path = ".opencode/skills".to_string();
 
-        fs::create_dir_all(tmp.path().join(".pi/skills/pi-source-skill")).unwrap();
+        fs::create_dir_all(tmp.path().join(".opencode/skills/oc-skill")).unwrap();
         fs::create_dir_all(tmp.path().join(".claude/skills/claude-skill")).unwrap();
 
         let result = collect_target_skills(&config, tmp.path(), false);
 
-        assert!(!result.contains_key(&AgentName::Pi)); // same path as source
+        assert!(!result.contains_key(&AgentName::Opencode)); // same path as source
         let claude_skills = result.get(&AgentName::Claude).unwrap();
         assert_eq!(claude_skills.len(), 1);
         assert_eq!(claude_skills[0].0, "claude-skill");

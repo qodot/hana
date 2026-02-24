@@ -20,6 +20,11 @@ Each AI coding agent stores skills and instructions in different paths:
 
 They all follow the [Agent Skills](https://agentskills.io) standard. hana uses this common ground to sync everything from a single source.
 
+Without hana, you have to manually keep each agent's skills and instructions in sync. hana solves this with:
+
+- **Single source of truth** — `.agents/skills/` and `AGENTS.md` are the canonical source. All other agent paths are symlinks pointing back to it.
+- **Reverse collection** — When an agent creates a new skill in its own directory (e.g., `.claude/skills/new-skill/`), hana detects it and collects it back to the source automatically.
+
 ## How It Works
 
 1. Uses `.agents/skills/` as the source of truth

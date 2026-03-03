@@ -45,7 +45,17 @@ hana status    # 현재 동기화 상태 확인
 
 ## 설치
 
-> 🚧 개발 중
+crates.io에서 설치:
+
+```bash
+cargo install hanacli
+```
+
+설치 후 실행 명령어는 `hana`다:
+
+```bash
+hana --help
+```
 
 ## 라이선스
 

@@ -45,7 +45,17 @@ hana status    # Check current sync state
 
 ## Install
 
-> 🚧 Under development
+Install from crates.io:
+
+```bash
+cargo install hanacli
+```
+
+After installation, use the `hana` command:
+
+```bash
+hana --help
+```
 
 ## License
 

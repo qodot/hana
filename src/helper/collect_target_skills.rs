@@ -65,23 +65,27 @@ mod tests {
     }
 
     #[test]
-    fn test_collect_skills_pi_excluded_same_as_source() {
+    fn test_collect_skills_codex_excluded_same_as_source() {
         let tmp = TempDir::new().unwrap();
 
-        // Project mode: pi and codex both use .agents/skills (same as source)
+        // Project mode: codex uses .agents/skills (same as source), pi uses .pi/skills
         let config = Config::default();
         fs::create_dir_all(tmp.path().join(".agents/skills/some-skill")).unwrap();
+        fs::create_dir_all(tmp.path().join(".pi/skills/pi-skill")).unwrap();
 
         let project_result = collect_target_skills(&config, tmp.path(), false);
-        assert!(!project_result.contains_key(&AgentName::Pi));
+        assert!(project_result.contains_key(&AgentName::Pi));
         assert!(!project_result.contains_key(&AgentName::Codex));
+        let pi_skills = project_result.get(&AgentName::Pi).unwrap();
+        assert_eq!(pi_skills.len(), 1);
+        assert_eq!(pi_skills[0].0, "pi-skill");
 
         // Global mode: override source to match target (in tests, ~ resolves differently)
         let mut global_config = Config::default();
         global_config.source.skills_path_global = ".agents/skills".to_string();
 
         let global_result = collect_target_skills(&global_config, tmp.path(), true);
-        assert!(!global_result.contains_key(&AgentName::Pi));
+        assert!(global_result.contains_key(&AgentName::Pi));
         assert!(!global_result.contains_key(&AgentName::Codex));
     }
 

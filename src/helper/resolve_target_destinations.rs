@@ -68,8 +68,13 @@ mod tests {
         let destinations =
             resolve_target_destinations(&config, tmp.path(), true, TargetFeature::Skills);
 
-        // Pi and Codex use .agents/skills (same as source), so excluded
-        assert!(!destinations.contains_key(&AgentName::Pi));
+        // Pi uses .pi/agent/skills (different from source), so included
+        assert!(destinations.contains_key(&AgentName::Pi));
+        assert_eq!(
+            destinations.get(&AgentName::Pi).unwrap(),
+            &tmp.path().join(".pi/agent/skills")
+        );
+        // Codex uses .agents/skills (same as source), so excluded
         assert!(!destinations.contains_key(&AgentName::Codex));
         assert_eq!(
             destinations.get(&AgentName::Opencode).unwrap(),

@@ -101,7 +101,7 @@ impl TargetConfig {
         let (skills_path, skills_path_global) = match agent {
             AgentName::Claude => (".claude/skills", ".claude/skills"),
             AgentName::Codex => (".agents/skills", ".agents/skills"),
-            AgentName::Pi => (".agents/skills", ".agents/skills"),
+            AgentName::Pi => (".pi/skills", ".pi/agent/skills"),
             AgentName::Opencode => (".opencode/skills", ".config/opencode/skills"),
         };
 
@@ -351,11 +351,11 @@ mod tests {
         assert_eq!(config.targets.len(), 4);
         assert_eq!(
             config.target_skills_path("pi", false).unwrap(),
-            ".agents/skills"
+            ".pi/skills"
         );
         assert_eq!(
             config.target_skills_path("pi", true).unwrap(),
-            ".agents/skills"
+            ".pi/agent/skills"
         );
     }
 

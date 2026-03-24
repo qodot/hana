@@ -5,6 +5,22 @@ use std::path::{Path, PathBuf};
 use crate::config::AgentName;
 use crate::sync::SyncWarning;
 
+/// Returns true if a directory contains no files recursively (only empty subdirectories).
+fn is_dir_empty(path: &Path) -> bool {
+    fs::read_dir(path)
+        .map(|entries| {
+            entries.filter_map(|e| e.ok()).all(|entry| {
+                let p = entry.path();
+                if p.is_dir() && !p.is_symlink() {
+                    is_dir_empty(&p)
+                } else {
+                    false
+                }
+            })
+        })
+        .unwrap_or(true)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillLinkTask {
     pub skill: String,
@@ -71,7 +87,8 @@ pub fn move_target_skills(
         let dest = source_dir.join(name.as_str());
 
         if dest.exists() {
-            if force {
+            let should_remove = force || (dest.is_dir() && !dest.is_symlink() && is_dir_empty(&dest));
+            if should_remove {
                 if !dry_run {
                     let remove_result = if dest.is_symlink() {
                         fs::remove_file(&dest)
@@ -283,5 +300,51 @@ mod tests {
         assert_eq!(tasks[0].agent, AgentName::Pi);
         assert_eq!(tasks[0].target_path, source_dir.join("new-skill"));
         assert_eq!(tasks[0].link_path, pi_skill);
+    }
+
+    #[test]
+    fn test_mv_skills_auto_replaces_empty_source_dir() {
+        let tmp = TempDir::new().unwrap();
+        let source_dir = tmp.path().join(".agents/skills");
+        // Source has only empty subdirectories (no files)
+        fs::create_dir_all(source_dir.join("my-skill/scripts")).unwrap();
+
+        let pi_skill = tmp.path().join(".pi/skills/my-skill");
+        fs::create_dir_all(&pi_skill).unwrap();
+        fs::write(pi_skill.join("SKILL.md"), "# Pi").unwrap();
+
+        let collected_by_agent = HashMap::from([(
+            AgentName::Pi,
+            vec![("my-skill".to_string(), pi_skill.clone())],
+        )]);
+
+        let move_result =
+            move_target_skills(&collected_by_agent, &source_dir, false, false).unwrap();
+        let tasks = move_result.tasks;
+
+        assert_eq!(tasks.len(), 1);
+        assert!(source_dir.join("my-skill").is_dir());
+        assert_eq!(
+            fs::read_to_string(source_dir.join("my-skill/SKILL.md")).unwrap(),
+            "# Pi"
+        );
+        assert!(!pi_skill.exists());
+    }
+
+    #[test]
+    fn test_is_dir_empty_with_nested_empty_dirs() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("empty-skill");
+        fs::create_dir_all(dir.join("scripts/sub")).unwrap();
+        assert!(is_dir_empty(&dir));
+    }
+
+    #[test]
+    fn test_is_dir_empty_with_file() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("skill");
+        fs::create_dir_all(dir.join("scripts")).unwrap();
+        fs::write(dir.join("SKILL.md"), "# Skill").unwrap();
+        assert!(!is_dir_empty(&dir));
     }
 }
